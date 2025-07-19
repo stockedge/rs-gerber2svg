@@ -121,15 +121,15 @@ impl Gerber2SVG {
                                     self.gerber_doc
                                         .apertures
                                         .get(&i)
-                                        .expect(format!("Unknown aperture id '{}'", i).as_str())
+                                        .expect(format!("Unknown aperture id '{i}'").as_str())
                                         .clone(),
                                 )
                             }
                         },
                         FunctionCode::GCode(g) => match g {
                             GCode::InterpolationMode(im) => self.draw_state = *im,
-                            GCode::Comment(c) => log::info!("[COMMENT] \"{}\"", c),
-                            _ => log::error!("Unsupported GCode:\r\n{:#?}", g),
+                            GCode::Comment(c) => log::info!("[COMMENT] \"{c}\""),
+                            _ => log::error!("Unsupported GCode:\r\n{g:#?}"),
                         },
                         FunctionCode::MCode(_) => (),
                     }
@@ -191,9 +191,9 @@ impl Gerber2SVG {
                     (height / 2.0) as f32,
                 );
             }
-            Aperture::Obround(o) => log::error!("Unsupported Obround aperture:\r\n{:#?}", o),
-            Aperture::Polygon(p) => log::error!("Unsupported Polygon aperture:\r\n{:#?}", p),
-            Aperture::Other(o) => log::error!("Unsupported Other aperture:\r\n{:#?}", o),
+            Aperture::Obround(o) => log::error!("Unsupported Obround aperture:\r\n{o:#?}"),
+            Aperture::Polygon(p) => log::error!("Unsupported Polygon aperture:\r\n{p:#?}"),
+            Aperture::Other(o) => log::error!("Unsupported Other aperture:\r\n{o:#?}"),
         }
 
         self.svg_document = doc;
