@@ -1,40 +1,40 @@
 use gerber2svg::Gerber2SVG;
-use structopt::StructOpt;
+use clap::Parser;
 
 // use crate::gerber_svg::GerberSVG;
 // mod gerber_svg;
 
 #[allow(dead_code)]
-#[derive(Debug, StructOpt)]
-#[structopt(name = "rusty-pcb", about = "Usage of rusty-pcb", version = "0.1.0")]
+#[derive(Debug, Parser)]
+#[command(name = "rusty-pcb", about = "Usage of rusty-pcb", version = "0.1.0")]
 struct Opt {
     /// The Gerber file
-    #[structopt(short = "-i", long = "--input")]
+    #[arg(short = 'i', long = "input")]
     gerber_file: String,
 
     /// The SVG output file (otherwise SVG will be print on standard output)
-    #[structopt(short = "-o", long = "--output")]
+    #[arg(short = 'o', long = "output")]
     svg_file: Option<String>,
 
     /// Crop the SVG to remove unnecessary space.
-    #[structopt(short = "-c", long = "--crop")]
+    #[arg(short = 'c', long = "crop")]
     crop: bool,
 
     /// Scale the path and apertures
-    #[structopt(short = "-s", long = "--scale", default_value = "1.0")]
+    #[arg(short = 's', long = "scale", default_value = "1.0")]
     scale: f32,
 
     /// Be more verbose and show gerber comments
-    #[structopt(short = "-v", long = "--verbose")]
+    #[arg(short = 'v', long = "verbose")]
     verbose: bool,
 
     /// Be verbose and print debug info
-    #[structopt(short = "-d", long = "--debug")]
+    #[arg(short = 'd', long = "debug")]
     debug: bool,
 }
 
 pub fn main() -> Result<(), std::io::Error> {
-    let opt = Opt::from_args();
+    let opt = Opt::parse();
 
     if opt.debug {
         simple_logger::init_with_level(log::Level::Debug)
