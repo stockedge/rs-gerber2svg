@@ -24,7 +24,7 @@ gerber-types = "0.2.0"
 gerber_parser = "0.1.2"
 log = "0.4.19"
 simple_logger = "4.2.0"
-structopt = { version = "0.3.26", features = ["color", "suggestions", "wrap_help"] }
+clap = { version = "4.0", features = ["derive"] }
 svg = "0.13.1"
 
 [dev-dependencies]
