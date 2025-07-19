@@ -6,7 +6,6 @@ use gerber_parser::parser::parse_gerber;
 use gerber_types::{Aperture, Command, Coordinates, GCode, InterpolationMode};
 use gerber_types::{CoordinateOffset, FunctionCode};
 
-use svg;
 use svg::node::element::{path, Circle, Path, Rectangle};
 
 mod point;
@@ -40,11 +39,12 @@ impl Gerber2SVG {
         Ok(Self::from_gerber_doc(gerber_doc))
     }
 
-    /// Create Instance form GerberDoc struct
-    /// * gerber_doc: `GerberDoc` struct
+    /// Create Instance form `GerberDoc` struct
+    /// * `gerber_doc`: `GerberDoc` struct
+    #[must_use]
     pub fn from_gerber_doc(gerber_doc: GerberDoc) -> Self {
-        let s = Self {
-            gerber_doc: gerber_doc,
+        Self {
+            gerber_doc,
             scale: 1.0,
             draw_state: InterpolationMode::Linear,
             position: Point::new(0.0, 0.0),
@@ -55,13 +55,12 @@ impl Gerber2SVG {
             max_x: f32::NEG_INFINITY,
             min_y: f32::INFINITY,
             max_y: f32::NEG_INFINITY,
-        };
-
-        return s;
+        }
     }
 
     /// Set the scale of the path and aperture. (Must be called **before** the build function)
     /// * scale : `f32` the scale value (> 0.0)
+    #[must_use]
     pub fn set_scale(mut self, scale: f32) -> Self {
         if scale > 0.0 {
             self.scale = scale;
@@ -69,7 +68,7 @@ impl Gerber2SVG {
             log::warn!("Scale value need to be greater than 0.0. Skip scale setting");
         }
 
-        return self;
+        self
     }
 
     /// Save the gerber as SVG file
@@ -88,6 +87,7 @@ impl Gerber2SVG {
     }
 
     /// Build the SVG
+    #[must_use]
     pub fn build(mut self) -> Self {
         log::debug!("Start building...");
         for c in &self.gerber_doc.commands.clone() {
@@ -100,7 +100,7 @@ impl Gerber2SVG {
                                     if self.draw_state == InterpolationMode::Linear {
                                         self.add_draw_segment(coord);
                                     } else {
-                                        self.add_arc_segment(coord, offset.as_ref().expect(format!("No offset coord with 'Circular' state\r\n{c:#?}").as_str()))
+                                        self.add_arc_segment(coord, offset.as_ref().unwrap_or_else(|| panic!("No offset coord with 'Circular' state\r\n{c:#?}")));
                                     }
                                     self.move_position(coord);
                                 }
@@ -120,10 +120,10 @@ impl Gerber2SVG {
                                 self.selected_aperture = Some(
                                     self.gerber_doc
                                         .apertures
-                                        .get(&i)
-                                        .expect(format!("Unknown aperture id '{i}'").as_str())
+                                        .get(i)
+                                        .unwrap_or_else(|| panic!("Unknown aperture id '{i}'"))
                                         .clone(),
-                                )
+                                );
                             }
                         },
                         FunctionCode::GCode(g) => match g {
@@ -138,10 +138,10 @@ impl Gerber2SVG {
             };
         }
 
-        return self;
+        self
     }
 
-    fn place_aperture(&mut self, coord: &Coordinates) -> () {
+    fn place_aperture(&mut self, coord: &Coordinates) {
         let target = Self::coordinate_to_float(coord);
         let target = (
             target.0.unwrap_or(self.position.x),
@@ -162,20 +162,23 @@ impl Gerber2SVG {
             .expect("No aperture selected")
         {
             Aperture::Circle(c) => {
-                let radius = (c.diameter / 2.0) * self.scale as f64;
+                let radius = (c.diameter / 2.0) * f64::from(self.scale);
                 let circle = Circle::new()
                     .set("cx", target.0)
                     .set("cy", target.1)
                     .set("r", radius)
                     .set("fill", "white");
                 doc = doc.add(circle);
+                #[allow(clippy::cast_possible_truncation)]
                 self.check_bbox(target.0, target.1, radius as f32, radius as f32);
             }
             Aperture::Rectangle(r) => {
-                let width = r.x * self.scale as f64;
-                let height = r.y * self.scale as f64;
+                let width = r.x * f64::from(self.scale);
+                let height = r.y * f64::from(self.scale);
+                #[allow(clippy::cast_possible_truncation)]
                 let x = target.0 - (width / 2.0) as f32;
-                let y = target.1 - (width / 2.0) as f32;
+                #[allow(clippy::cast_possible_truncation)]
+                let y = target.1 - (height / 2.0) as f32;
 
                 let rect = Rectangle::new()
                     .set("x", x)
@@ -184,6 +187,7 @@ impl Gerber2SVG {
                     .set("height", height)
                     .set("fill", "white");
                 doc = doc.add(rect);
+                #[allow(clippy::cast_possible_truncation)]
                 self.check_bbox(
                     target.0,
                     target.1,
@@ -199,7 +203,7 @@ impl Gerber2SVG {
         self.svg_document = doc;
     }
 
-    fn add_draw_segment(&mut self, coord: &Coordinates) -> () {
+    fn add_draw_segment(&mut self, coord: &Coordinates) {
         let target = Self::coordinate_to_float(coord);
         let target = (
             target.0.unwrap_or(self.position.x),
@@ -219,7 +223,7 @@ impl Gerber2SVG {
         self.check_bbox(target.0, target.1, stroke / 2.0, stroke / 2.0);
     }
 
-    fn add_arc_segment(&mut self, coord: &Coordinates, offset: &CoordinateOffset) -> () {
+    fn add_arc_segment(&self, coord: &Coordinates, offset: &CoordinateOffset) {
         log::debug!(
             "Draw arc from {:?} to {:?} with offset {:?}",
             self.position,
@@ -230,7 +234,7 @@ impl Gerber2SVG {
         //TODO : self.check_bbox(...);
     }
 
-    fn move_position(&mut self, coord: &Coordinates) -> () {
+    fn move_position(&mut self, coord: &Coordinates) {
         let pos = Self::coordinate_to_float(coord);
 
         self.position.x = pos.0.unwrap_or(self.position.x);
@@ -263,20 +267,20 @@ impl Gerber2SVG {
     }
 
     fn get_path_stroke(&self) -> f32 {
-        return match self
+        if let Aperture::Circle(c) = self
             .selected_aperture
             .as_ref()
             .expect("No selected aperture for storke")
         {
-            Aperture::Circle(c) => c.diameter as f32,
-            _ => {
-                log::warn!(
-                    "Unsupported stroke aperture other than Circle.\r\n{:#?}",
-                    self.selected_aperture
-                );
-                0_f32
-            }
-        };
+            #[allow(clippy::cast_possible_truncation)]
+            { c.diameter as f32 }
+        } else {
+            log::warn!(
+                "Unsupported stroke aperture other than Circle.\r\n{:#?}",
+                self.selected_aperture
+            );
+            0_f32
+        }
     }
 
     fn coordinate_to_float(coord: &Coordinates) -> (Option<f32>, Option<f32>) {
@@ -291,7 +295,7 @@ impl Gerber2SVG {
                     .unwrap()
                     .parse::<f32>()
                     .unwrap()
-                    / 10_f32.powi(coord.format.decimal as i32),
+                    / 10_f32.powi(i32::from(coord.format.decimal)),
             );
         }
 
@@ -304,11 +308,11 @@ impl Gerber2SVG {
                     .unwrap()
                     .parse::<f32>()
                     .unwrap()
-                    / 10_f32.powi(coord.format.decimal as i32),
-            )
+                    / 10_f32.powi(i32::from(coord.format.decimal)),
+            );
         }
 
-        return result;
+        result
     }
 
     fn coordinate_offset_to_float(coord: &CoordinateOffset) -> (Option<f32>, Option<f32>) {
@@ -323,7 +327,7 @@ impl Gerber2SVG {
                     .unwrap()
                     .parse::<f32>()
                     .unwrap()
-                    / 10_f32.powi(coord.format.decimal as i32),
+                    / 10_f32.powi(i32::from(coord.format.decimal)),
             );
         }
 
@@ -336,11 +340,11 @@ impl Gerber2SVG {
                     .unwrap()
                     .parse::<f32>()
                     .unwrap()
-                    / 10_f32.powi(coord.format.decimal as i32),
-            )
+                    / 10_f32.powi(i32::from(coord.format.decimal)),
+            );
         }
 
-        return result;
+        result
     }
 
     fn check_bbox(&mut self, pos_x: f32, pos_y: f32, stroke_x: f32, stroke_y: f32) {

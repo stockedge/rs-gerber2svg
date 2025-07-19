@@ -31,10 +31,8 @@ svg = "0.13.1"
 tempfile = "3.8"
 
 [lints.clippy]
-# Basic clippy configuration - allow existing patterns to avoid breaking changes
-expect_fun_call = "allow"
-needless_borrow = "allow"
-single_component_path_imports = "allow"
-redundant_field_names = "allow"
-unused_unit = "allow"
-needless_return = "allow"
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+multiple_crate_versions = "allow"
