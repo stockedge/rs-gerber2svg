@@ -54,10 +54,10 @@ pub fn main() -> Result<(), std::io::Error> {
 
     if opt.svg_file.is_some() {
         log::info!("Save SVG file...");
-        gerber.save_svg(&opt.svg_file.unwrap().as_str(), opt.crop)?;
+        gerber.save_svg(&opt.svg_file.unwrap().as_str())?;
     } else {
         log::info!("Print SVG file...");
-        println!("{}", gerber.to_string(opt.crop));
+        println!("{}", gerber.to_string());
     }
 
     Ok(())

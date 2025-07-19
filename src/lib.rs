@@ -189,8 +189,12 @@ impl Gerber2SVG {
                             log::debug!("DCode: {:?}", d);
                             match d {
                                 gerber_types::DCode::Operation(op) => match op {
-                                    gerber_types::Operation::Interpolate(coord) => {
-                                        self.add_draw_segment(coord);
+                                    gerber_types::Operation::Interpolate(coord, offset) => {
+                                        if let Some(offset) = offset {
+                                            self.add_arc_segment(coord, offset);
+                                        } else {
+                                            self.add_draw_segment(coord);
+                                        }
                                     }
                                     gerber_types::Operation::Move(coord) => {
                                         self.move_position(coord);
@@ -403,7 +407,7 @@ impl Gerber2SVG {
     }
 
     fn create_path_from_data(&mut self) {
-        if !self.current_path_data.to_string().is_empty() {
+        if !format!("{:?}", self.current_path_data).is_empty() {
             let mut doc = std::mem::replace(&mut self.svg_document, svg::Document::new());
 
             let stroke_color = self.get_path_stroke();
@@ -427,14 +431,14 @@ impl Gerber2SVG {
     }
 
     fn coordinate_to_float(coord: &Coordinates) -> (f32, f32) {
-        let x = coord.x.map_or(0.0, |x| x as f32 / 1_000_000.0);
-        let y = coord.y.map_or(0.0, |y| y as f32 / 1_000_000.0);
+        let x = coord.x.map_or(0.0, |x| Into::<f64>::into(x) as f32);
+        let y = coord.y.map_or(0.0, |y| Into::<f64>::into(y) as f32);
         (x, y)
     }
 
     fn coordinate_offset_to_float(offset: &CoordinateOffset) -> (f32, f32) {
-        let x = offset.x.map_or(0.0, |x| x as f32 / 1_000_000.0);
-        let y = offset.y.map_or(0.0, |y| y as f32 / 1_000_000.0);
+        let x = offset.x.map_or(0.0, |x| Into::<f64>::into(x) as f32);
+        let y = offset.y.map_or(0.0, |y| Into::<f64>::into(y) as f32);
         (x, y)
     }
 
@@ -558,7 +562,7 @@ impl Gerber2SVG {
         }
     }
 
-    fn command_to_svg_element(&self, _command: &Command) -> Option<svg::node::Node> {
+    fn command_to_svg_element(&self, _command: &Command) -> Option<Box<dyn svg::node::Node>> {
         None
     }
 
@@ -588,7 +592,7 @@ impl Gerber2SVG {
                     group = group.add(circle);
                 }
                 MacroPrimitive::VectorLine { exposure, width, start_x, start_y, end_x, end_y, rotation: _ } => {
-                    let mut path_data = path::Data::new()
+                    let path_data = path::Data::new()
                         .move_to((*start_x, *start_y))
                         .line_to((*end_x, *end_y));
                     
