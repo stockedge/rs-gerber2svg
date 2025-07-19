@@ -80,6 +80,7 @@ pub struct ApertureMacro {
     pub primitives: Vec<MacroPrimitive>,
 }
 
+#[allow(dead_code)]
 pub struct Gerber2SVG {
     gerber_doc: GerberDoc,
     scale: f32,
@@ -118,6 +119,7 @@ pub struct Gerber2SVG {
 impl Gerber2SVG {
     /// Create instance from a Gerber file
     /// * filename: `&str` path to the gerber file
+    #[allow(clippy::missing_errors_doc)]
     pub fn from_file(filename: &str) -> Result<Self, std::io::Error> {
         let file = File::open(filename)?;
         let reader = BufReader::new(file);
@@ -168,11 +170,13 @@ impl Gerber2SVG {
         self
     }
 
+    #[allow(clippy::missing_errors_doc)]
     pub fn save_svg(&self, filename: &str) -> Result<(), std::io::Error> {
         svg::save(filename, &self.svg_document)
     }
 
     #[must_use]
+    #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         self.svg_document.to_string()
     }
@@ -183,43 +187,41 @@ impl Gerber2SVG {
 
         for c in &self.gerber_doc.commands.clone() {
             match c {
-                Command::FunctionCode(f) => {
-                    match f {
-                        FunctionCode::DCode(d) => {
-                            log::debug!("DCode: {:?}", d);
-                            match d {
-                                gerber_types::DCode::Operation(op) => match op {
-                                    gerber_types::Operation::Interpolate(coord, offset) => {
-                                        if let Some(offset) = offset {
-                                            self.add_arc_segment(coord, offset);
-                                        } else {
-                                            self.add_draw_segment(coord);
-                                        }
+                Command::FunctionCode(f) => match f {
+                    FunctionCode::DCode(d) => {
+                        log::debug!("DCode: {:?}", d);
+                        match d {
+                            gerber_types::DCode::Operation(op) => match op {
+                                gerber_types::Operation::Interpolate(coord, offset) => {
+                                    if let Some(offset) = offset {
+                                        self.add_arc_segment(coord, offset);
+                                    } else {
+                                        self.add_draw_segment(coord);
                                     }
-                                    gerber_types::Operation::Move(coord) => {
-                                        self.move_position(coord);
-                                    }
-                                    gerber_types::Operation::Flash(coord) => {
-                                        self.move_position(coord);
-                                        self.place_aperture();
-                                    }
-                                },
-                                gerber_types::DCode::SelectAperture(a) => {
-                                    log::debug!("Select aperture: {:?}", a);
-                                    self.selected_aperture = self.gerber_doc.apertures.get(a).cloned();
                                 }
+                                gerber_types::Operation::Move(coord) => {
+                                    self.move_position(coord);
+                                }
+                                gerber_types::Operation::Flash(coord) => {
+                                    self.move_position(coord);
+                                    self.place_aperture();
+                                }
+                            },
+                            gerber_types::DCode::SelectAperture(a) => {
+                                log::debug!("Select aperture: {:?}", a);
+                                self.selected_aperture = self.gerber_doc.apertures.get(a).cloned();
                             }
-                        },
-                        FunctionCode::GCode(g) => match g {
-                            GCode::InterpolationMode(im) => self.draw_state = *im,
-                            GCode::Comment(c) => log::info!("[COMMENT] \"{c}\""),
-                            GCode::RegionMode(true) => self.handle_region_start(),
-                            GCode::RegionMode(false) => self.handle_region_end(),
-                            _ => log::error!("Unsupported GCode:\r\n{g:#?}"),
-                        },
-                        FunctionCode::MCode(_) => (),
+                        }
                     }
-                }
+                    FunctionCode::GCode(g) => match g {
+                        GCode::InterpolationMode(im) => self.draw_state = *im,
+                        GCode::Comment(c) => log::info!("[COMMENT] \"{c}\""),
+                        GCode::RegionMode(true) => self.handle_region_start(),
+                        GCode::RegionMode(false) => self.handle_region_end(),
+                        _ => log::error!("Unsupported GCode:\r\n{g:#?}"),
+                    },
+                    FunctionCode::MCode(_) => (),
+                },
                 Command::ExtendedCode(e) => {
                     self.handle_extended_code(e);
                 }
@@ -231,6 +233,11 @@ impl Gerber2SVG {
         self
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss
+    )]
     fn place_aperture(&mut self) {
         let target = (self.position.x, self.position.y);
         let transformed_target = self.apply_transformations(target.0, target.1);
@@ -255,7 +262,12 @@ impl Gerber2SVG {
                     .set("fill", fill_color);
                 doc = doc.add(circle);
                 #[allow(clippy::cast_possible_truncation)]
-                self.check_bbox(transformed_target.0, transformed_target.1, radius as f32, radius as f32);
+                self.check_bbox(
+                    transformed_target.0,
+                    transformed_target.1,
+                    radius as f32,
+                    radius as f32,
+                );
             }
             Aperture::Rectangle(r) => {
                 let width = r.x * f64::from(self.scale) * self.scaling;
@@ -284,55 +296,106 @@ impl Gerber2SVG {
                 let width = o.x * f64::from(self.scale) * self.scaling;
                 let height = o.y * f64::from(self.scale) * self.scaling;
                 let radius = (width.min(height) / 2.0) as f32;
-                
+
                 let mut path_data = path::Data::new();
                 if width >= height {
                     let rect_width = width - height;
                     path_data = path_data
-                        .move_to((transformed_target.0 - rect_width as f32 / 2.0, transformed_target.1 - radius))
-                        .line_to((transformed_target.0 + rect_width as f32 / 2.0, transformed_target.1 - radius))
-                        .elliptical_arc_to((transformed_target.0 + rect_width as f32 / 2.0, transformed_target.1 + radius, radius, radius, 0.0))
-                        .line_to((transformed_target.0 - rect_width as f32 / 2.0, transformed_target.1 + radius))
-                        .elliptical_arc_to((transformed_target.0 - rect_width as f32 / 2.0, transformed_target.1 - radius, radius, radius, 0.0))
+                        .move_to((
+                            transformed_target.0 - rect_width as f32 / 2.0,
+                            transformed_target.1 - radius,
+                        ))
+                        .line_to((
+                            transformed_target.0 + rect_width as f32 / 2.0,
+                            transformed_target.1 - radius,
+                        ))
+                        .elliptical_arc_to((
+                            transformed_target.0 + rect_width as f32 / 2.0,
+                            transformed_target.1 + radius,
+                            radius,
+                            radius,
+                            0.0,
+                        ))
+                        .line_to((
+                            transformed_target.0 - rect_width as f32 / 2.0,
+                            transformed_target.1 + radius,
+                        ))
+                        .elliptical_arc_to((
+                            transformed_target.0 - rect_width as f32 / 2.0,
+                            transformed_target.1 - radius,
+                            radius,
+                            radius,
+                            0.0,
+                        ))
                         .close();
                 } else {
                     let rect_height = height - width;
                     path_data = path_data
-                        .move_to((transformed_target.0 - radius, transformed_target.1 - rect_height as f32 / 2.0))
-                        .line_to((transformed_target.0 - radius, transformed_target.1 + rect_height as f32 / 2.0))
-                        .elliptical_arc_to((transformed_target.0 + radius, transformed_target.1 + rect_height as f32 / 2.0, radius, radius, 0.0))
-                        .line_to((transformed_target.0 + radius, transformed_target.1 - rect_height as f32 / 2.0))
-                        .elliptical_arc_to((transformed_target.0 - radius, transformed_target.1 - rect_height as f32 / 2.0, radius, radius, 0.0))
+                        .move_to((
+                            transformed_target.0 - radius,
+                            transformed_target.1 - rect_height as f32 / 2.0,
+                        ))
+                        .line_to((
+                            transformed_target.0 - radius,
+                            transformed_target.1 + rect_height as f32 / 2.0,
+                        ))
+                        .elliptical_arc_to((
+                            transformed_target.0 + radius,
+                            transformed_target.1 + rect_height as f32 / 2.0,
+                            radius,
+                            radius,
+                            0.0,
+                        ))
+                        .line_to((
+                            transformed_target.0 + radius,
+                            transformed_target.1 - rect_height as f32 / 2.0,
+                        ))
+                        .elliptical_arc_to((
+                            transformed_target.0 - radius,
+                            transformed_target.1 - rect_height as f32 / 2.0,
+                            radius,
+                            radius,
+                            0.0,
+                        ))
                         .close();
                 }
-                
-                let path = Path::new()
-                    .set("fill", fill_color)
-                    .set("d", path_data);
+
+                let path = Path::new().set("fill", fill_color).set("d", path_data);
                 doc = doc.add(path);
                 #[allow(clippy::cast_possible_truncation)]
-                self.check_bbox(transformed_target.0, transformed_target.1, (width / 2.0) as f32, (height / 2.0) as f32);
+                self.check_bbox(
+                    transformed_target.0,
+                    transformed_target.1,
+                    (width / 2.0) as f32,
+                    (height / 2.0) as f32,
+                );
             }
             Aperture::Polygon(p) => {
                 let radius = (p.diameter / 2.0) * f64::from(self.scale) * self.scaling;
                 let vertices = p.vertices as usize;
                 let rotation_offset = p.rotation.unwrap_or(0.0) + self.rotation;
-                
+
                 let mut points = Vec::new();
                 for i in 0..vertices {
-                    let angle = (i as f64 * 2.0 * std::f64::consts::PI / vertices as f64) + rotation_offset.to_radians();
+                    let angle = (i as f64 * 2.0 * std::f64::consts::PI / vertices as f64)
+                        + rotation_offset.to_radians();
                     let x = transformed_target.0 + (radius * angle.cos()) as f32;
                     let y = transformed_target.1 + (radius * angle.sin()) as f32;
                     points.push(format!("{x},{y}"));
                 }
-                
+
                 let polygon = Polygon::new()
                     .set("points", points.join(" "))
                     .set("fill", fill_color);
-                
+
                 doc = doc.add(polygon);
                 #[allow(clippy::cast_possible_truncation)]
-                self.check_bbox(transformed_target.0, transformed_target.1, radius as f32, radius as f32);
+                self.check_bbox(
+                    transformed_target.0,
+                    transformed_target.1,
+                    radius as f32,
+                    radius as f32,
+                );
             }
             Aperture::Other(o) => {
                 log::warn!("Other aperture type not yet supported: {o:#?}");
@@ -347,21 +410,19 @@ impl Gerber2SVG {
         let transformed_target = self.apply_transformations(target.0, target.1);
 
         match self.draw_state {
-            InterpolationMode::Linear => {
-                match &mut self.drawing_state {
-                    DrawingState::Normal => {
-                        self.current_path_data = self
-                            .current_path_data
-                            .clone()
-                            .line_to((transformed_target.0, transformed_target.1));
-                    }
-                    DrawingState::InRegion { path_data } => {
-                        *path_data = path_data
-                            .clone()
-                            .line_to((transformed_target.0, transformed_target.1));
-                    }
+            InterpolationMode::Linear => match &mut self.drawing_state {
+                DrawingState::Normal => {
+                    self.current_path_data = self
+                        .current_path_data
+                        .clone()
+                        .line_to((transformed_target.0, transformed_target.1));
                 }
-            }
+                DrawingState::InRegion { path_data } => {
+                    *path_data = path_data
+                        .clone()
+                        .line_to((transformed_target.0, transformed_target.1));
+                }
+            },
             InterpolationMode::ClockwiseCircular => {
                 log::warn!("Clockwise circular interpolation not yet supported");
             }
@@ -423,19 +484,21 @@ impl Gerber2SVG {
         }
     }
 
-    fn get_path_stroke(&self) -> &str {
+    const fn get_path_stroke(&self) -> &str {
         match self.polarity {
             Polarity::Dark => "white",
             Polarity::Clear => "black",
         }
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     fn coordinate_to_float(coord: &Coordinates) -> (f32, f32) {
         let x = coord.x.map_or(0.0, |x| Into::<f64>::into(x) as f32);
         let y = coord.y.map_or(0.0, |y| Into::<f64>::into(y) as f32);
         (x, y)
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     fn coordinate_offset_to_float(offset: &CoordinateOffset) -> (f32, f32) {
         let x = offset.x.map_or(0.0, |x| Into::<f64>::into(x) as f32);
         let y = offset.y.map_or(0.0, |y| Into::<f64>::into(y) as f32);
@@ -471,18 +534,18 @@ impl Gerber2SVG {
         log::debug!("Ending region (G37)");
         if let DrawingState::InRegion { path_data } = &self.drawing_state {
             let mut doc = std::mem::replace(&mut self.svg_document, svg::Document::new());
-            
+
             let fill_color = match self.polarity {
                 Polarity::Dark => "white",
                 Polarity::Clear => "black",
             };
-            
+
             let path = Path::new()
                 .set("fill", fill_color)
                 .set("stroke", "none")
                 .set("fill-rule", "evenodd")
                 .set("d", path_data.clone());
-            
+
             doc = doc.add(path);
             self.svg_document = doc;
             self.drawing_state = DrawingState::Normal;
@@ -510,6 +573,7 @@ impl Gerber2SVG {
         }
     }
 
+    #[allow(clippy::cast_possible_truncation, clippy::suboptimal_flops)]
     fn apply_transformations(&self, x: f32, y: f32) -> (f32, f32) {
         let mut tx = x;
         let mut ty = y;
@@ -536,36 +600,39 @@ impl Gerber2SVG {
         (tx, ty)
     }
 
+    #[allow(dead_code)]
     fn finalize_step_and_repeat(&mut self) {
         if self.step_repeat_active && (!self.step_repeat_commands.is_empty()) {
             let mut doc = std::mem::replace(&mut self.svg_document, svg::Document::new());
-            
+
             for x in 0..self.step_repeat_x {
                 for y in 0..self.step_repeat_y {
                     if x == 0 && y == 0 {
                         continue;
                     }
-                    
-                    let offset_x = x as f64 * self.step_repeat_offset_x;
-                    let offset_y = y as f64 * self.step_repeat_offset_y;
-                    
-                    let repeat_group = Group::new()
-                        .set("transform", format!("translate({}, {})", offset_x, offset_y));
-                    
+
+                    let offset_x = f64::from(x) * self.step_repeat_offset_x;
+                    let offset_y = f64::from(y) * self.step_repeat_offset_y;
+
+                    let repeat_group =
+                        Group::new().set("transform", format!("translate({offset_x}, {offset_y})"));
+
                     doc = doc.add(repeat_group);
                 }
             }
-            
+
             self.svg_document = doc;
             self.step_repeat_active = false;
             self.step_repeat_commands.clear();
         }
     }
 
+    #[allow(dead_code, clippy::unused_self)]
     fn command_to_svg_element(&self, _command: &Command) -> Option<Box<dyn svg::node::Node>> {
         None
     }
 
+    #[allow(dead_code, clippy::unused_self, clippy::used_underscore_binding)]
     fn parse_aperture_macro(&self, _name: &str, _definition: &str) -> ApertureMacro {
         ApertureMacro {
             name: _name.to_string(),
@@ -573,17 +640,29 @@ impl Gerber2SVG {
         }
     }
 
+    #[allow(
+        dead_code,
+        clippy::too_many_lines,
+        clippy::cast_lossless,
+        clippy::cast_precision_loss
+    )]
     fn instantiate_aperture_macro(&self, macro_def: &ApertureMacro, _params: &[f64]) -> Group {
         let mut group = Group::new();
-        
+
         let fill_color = match self.polarity {
             Polarity::Dark => "white",
             Polarity::Clear => "black",
         };
-        
+
         for primitive in &macro_def.primitives {
             match primitive {
-                MacroPrimitive::Circle { exposure, diameter, center_x, center_y, rotation: _ } => {
+                MacroPrimitive::Circle {
+                    exposure,
+                    diameter,
+                    center_x,
+                    center_y,
+                    rotation: _,
+                } => {
                     let circle = Circle::new()
                         .set("cx", *center_x)
                         .set("cy", *center_y)
@@ -591,11 +670,19 @@ impl Gerber2SVG {
                         .set("fill", if *exposure { fill_color } else { "black" });
                     group = group.add(circle);
                 }
-                MacroPrimitive::VectorLine { exposure, width, start_x, start_y, end_x, end_y, rotation: _ } => {
+                MacroPrimitive::VectorLine {
+                    exposure,
+                    width,
+                    start_x,
+                    start_y,
+                    end_x,
+                    end_y,
+                    rotation: _,
+                } => {
                     let path_data = path::Data::new()
                         .move_to((*start_x, *start_y))
                         .line_to((*end_x, *end_y));
-                    
+
                     let path = Path::new()
                         .set("d", path_data)
                         .set("stroke", if *exposure { fill_color } else { "black" })
@@ -603,7 +690,14 @@ impl Gerber2SVG {
                         .set("fill", "none");
                     group = group.add(path);
                 }
-                MacroPrimitive::CenterLine { exposure, width, height, center_x, center_y, rotation: _ } => {
+                MacroPrimitive::CenterLine {
+                    exposure,
+                    width,
+                    height,
+                    center_x,
+                    center_y,
+                    rotation: _,
+                } => {
                     let rect = Rectangle::new()
                         .set("x", center_x - width / 2.0)
                         .set("y", center_y - height / 2.0)
@@ -612,71 +706,90 @@ impl Gerber2SVG {
                         .set("fill", if *exposure { fill_color } else { "black" });
                     group = group.add(rect);
                 }
-                MacroPrimitive::Outline { exposure, points, rotation: _ } => {
+                MacroPrimitive::Outline {
+                    exposure,
+                    points,
+                    rotation: _,
+                } => {
                     if !points.is_empty() {
                         let mut path_data = path::Data::new().move_to(points[0]);
                         for point in points.iter().skip(1) {
                             path_data = path_data.line_to(*point);
                         }
                         path_data = path_data.close();
-                        
+
                         let polygon = Path::new()
                             .set("d", path_data)
                             .set("fill", if *exposure { fill_color } else { "black" });
                         group = group.add(polygon);
                     }
                 }
-                MacroPrimitive::Polygon { exposure, vertices, center_x, center_y, diameter, rotation } => {
+                MacroPrimitive::Polygon {
+                    exposure,
+                    vertices,
+                    center_x,
+                    center_y,
+                    diameter,
+                    rotation,
+                } => {
                     let mut points = Vec::new();
                     for i in 0..*vertices {
-                        let angle = (i as f64 * 2.0 * std::f64::consts::PI / *vertices as f64) + rotation.unwrap_or(0.0).to_radians();
+                        let angle = (f64::from(i) * 2.0 * std::f64::consts::PI
+                            / f64::from(*vertices))
+                            + rotation.unwrap_or(0.0).to_radians();
                         let x = center_x + (diameter / 2.0) * angle.cos();
                         let y = center_y + (diameter / 2.0) * angle.sin();
                         points.push(format!("{x},{y}"));
                     }
-                    
+
                     let polygon = Polygon::new()
                         .set("points", points.join(" "))
                         .set("fill", if *exposure { fill_color } else { "black" });
                     group = group.add(polygon);
                 }
-                MacroPrimitive::Thermal { center_x, center_y, outer_diameter, inner_diameter, gap, rotation: _ } => {
+                MacroPrimitive::Thermal {
+                    center_x,
+                    center_y,
+                    outer_diameter,
+                    inner_diameter,
+                    gap,
+                    rotation: _,
+                } => {
                     let outer_circle = Circle::new()
                         .set("cx", *center_x)
                         .set("cy", *center_y)
                         .set("r", outer_diameter / 2.0)
                         .set("fill", fill_color);
-                    
+
                     let inner_circle = Circle::new()
                         .set("cx", *center_x)
                         .set("cy", *center_y)
                         .set("r", inner_diameter / 2.0)
                         .set("fill", "black");
-                    
+
                     let gap_rect_h = Rectangle::new()
                         .set("x", center_x - outer_diameter / 2.0)
                         .set("y", center_y - gap / 2.0)
                         .set("width", *outer_diameter)
                         .set("height", *gap)
                         .set("fill", "black");
-                    
+
                     let gap_rect_v = Rectangle::new()
                         .set("x", center_x - gap / 2.0)
                         .set("y", center_y - outer_diameter / 2.0)
                         .set("width", *gap)
                         .set("height", *outer_diameter)
                         .set("fill", "black");
-                    
+
                     group = group.add(outer_circle);
                     group = group.add(inner_circle);
                     group = group.add(gap_rect_h);
                     group = group.add(gap_rect_v);
                 }
-                MacroPrimitive::Comment(_) => {
-                }
+                MacroPrimitive::Comment(_) => {}
             }
         }
-        
+
         group
     }
 }
@@ -686,7 +799,8 @@ mod tests {
     use super::*;
     use std::fs;
 
-    fn create_test_gerber_file() -> &'static str {
+    fn create_test_gerber_file() -> String {
+        let filename = format!("test_{}.gbr", std::process::id());
         let content = r#"G04 Test Gerber file*
 %FSLAX36Y36*%
 %MOMM*%
@@ -695,16 +809,16 @@ G01*
 X0Y0D02*
 X1000000Y0D01*
 M02*"#;
-        fs::write("test.gbr", content).unwrap();
-        "test.gbr"
+        fs::write(&filename, content).unwrap();
+        filename
     }
 
     #[test]
     fn test_from_file_success() {
         let filename = create_test_gerber_file();
-        let result = Gerber2SVG::from_file(filename);
+        let result = Gerber2SVG::from_file(&filename);
         assert!(result.is_ok());
-        fs::remove_file(filename).unwrap();
+        let _ = fs::remove_file(&filename);
     }
 
     #[test]
@@ -716,39 +830,40 @@ M02*"#;
     #[test]
     fn test_set_scale_positive() {
         let filename = create_test_gerber_file();
-        let gerber = Gerber2SVG::from_file(filename).unwrap().set_scale(2.0);
+        let gerber = Gerber2SVG::from_file(&filename).unwrap().set_scale(2.0);
         assert_eq!(gerber.scale, 2.0);
-        fs::remove_file(filename).unwrap();
+        let _ = fs::remove_file(&filename);
     }
 
     #[test]
     fn test_set_scale_zero_or_negative() {
         let filename = create_test_gerber_file();
-        let gerber = Gerber2SVG::from_file(filename).unwrap().set_scale(-1.0);
+        let gerber = Gerber2SVG::from_file(&filename).unwrap().set_scale(-1.0);
         assert_eq!(gerber.scale, 1.0);
-        fs::remove_file(filename).unwrap();
+        let _ = fs::remove_file(&filename);
     }
 
     #[test]
     fn test_build_and_to_string() {
         let filename = create_test_gerber_file();
-        let gerber = Gerber2SVG::from_file(filename).unwrap().build();
+        let gerber = Gerber2SVG::from_file(&filename).unwrap().build();
         let content = gerber.to_string();
         assert!(content.contains("<svg"));
-        fs::remove_file(filename).unwrap();
+        let _ = fs::remove_file(&filename);
     }
 
     #[test]
     fn test_save_svg() {
         let filename = create_test_gerber_file();
-        let gerber = Gerber2SVG::from_file(filename).unwrap().build();
-        let result = gerber.save_svg("test_output.svg");
+        let output_filename = format!("test_output_{}.svg", std::process::id());
+        let gerber = Gerber2SVG::from_file(&filename).unwrap().build();
+        let result = gerber.save_svg(&output_filename);
         assert!(result.is_ok());
-        
-        let content = fs::read_to_string("test_output.svg").unwrap();
+
+        let content = fs::read_to_string(&output_filename).unwrap();
         assert!(content.contains("<svg"));
-        
-        fs::remove_file(filename).unwrap();
-        fs::remove_file("test_output.svg").unwrap();
+
+        let _ = fs::remove_file(&filename);
+        let _ = fs::remove_file(&output_filename);
     }
 }
