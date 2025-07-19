@@ -1,0 +1,22 @@
+G04 Test file for RS274X features*
+%FSLAX36Y36*%
+%MOMM*%
+%LPD*%
+G04 Define aperture*
+%ADD10C,0.1*%
+G04 Start region*
+G36*
+G01*
+X0Y0D02*
+X1000000Y0D01*
+X1000000Y1000000D01*
+X0Y1000000D01*
+X0Y0D01*
+G37*
+G04 Change polarity*
+%LPC*%
+G04 Flash aperture*
+D10*
+X500000Y500000D03*
+G04 End of file*
+M02*
