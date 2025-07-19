@@ -189,7 +189,7 @@ impl Gerber2SVG {
             match c {
                 Command::FunctionCode(f) => match f {
                     FunctionCode::DCode(d) => {
-                        log::debug!("DCode: {:?}", d);
+                        log::debug!("DCode: {d:?}");
                         match d {
                             gerber_types::DCode::Operation(op) => match op {
                                 gerber_types::Operation::Interpolate(coord, offset) => {
@@ -208,7 +208,7 @@ impl Gerber2SVG {
                                 }
                             },
                             gerber_types::DCode::SelectAperture(a) => {
-                                log::debug!("Select aperture: {:?}", a);
+                                log::debug!("Select aperture: {a:?}");
                                 self.selected_aperture = self.gerber_doc.apertures.get(a).cloned();
                             }
                         }
