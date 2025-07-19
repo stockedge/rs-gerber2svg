@@ -107,6 +107,8 @@ pub struct Gerber2SVG {
     step_repeat_commands: Vec<Command>,
 
     aperture_macros: HashMap<String, ApertureMacro>,
+    current_block_aperture: Option<i32>,
+    current_block_commands: Vec<Command>,
     block_apertures: HashMap<String, Vec<Command>>,
     attributes: HashMap<String, String>,
 
@@ -153,6 +155,8 @@ impl Gerber2SVG {
             step_repeat_offset_y: 0.0,
             step_repeat_commands: Vec::new(),
             aperture_macros: HashMap::new(),
+            current_block_aperture: None,
+            current_block_commands: Vec::new(),
             block_apertures: HashMap::new(),
             attributes: HashMap::new(),
             min_x: f32::MAX,
@@ -560,6 +564,9 @@ impl Gerber2SVG {
                     gerber_types::Polarity::Clear => Polarity::Clear,
                 });
             }
+            ExtendedCode::StepAndRepeat(sr) => {
+                self.handle_step_and_repeat(sr);
+            }
             _ => {
                 log::debug!("Unsupported extended code: {extended_code:#?}");
             }
@@ -632,11 +639,144 @@ impl Gerber2SVG {
         None
     }
 
-    #[allow(dead_code, clippy::unused_self, clippy::used_underscore_binding)]
-    fn parse_aperture_macro(&self, _name: &str, _definition: &str) -> ApertureMacro {
+    fn parse_aperture_macro(&self, name: &str, definition: &str) -> ApertureMacro {
+        let mut primitives = Vec::new();
+        
+        for primitive_str in definition.split('*').filter(|s| !s.trim().is_empty()) {
+            if let Some(primitive) = self.parse_primitive(primitive_str.trim()) {
+                primitives.push(primitive);
+            }
+        }
+        
         ApertureMacro {
-            name: _name.to_string(),
-            primitives: Vec::new(),
+            name: name.to_string(),
+            primitives,
+        }
+    }
+
+    fn parse_primitive(&self, primitive_str: &str) -> Option<MacroPrimitive> {
+        let parts: Vec<&str> = primitive_str.split(',').collect();
+        if parts.is_empty() {
+            return None;
+        }
+        
+        match parts[0].parse::<u32>() {
+            Ok(0) => Some(MacroPrimitive::Comment(parts.get(1).unwrap_or(&"").to_string())),
+            Ok(1) => {
+                if parts.len() >= 5 {
+                    Some(MacroPrimitive::Circle {
+                        exposure: parts[1].parse().unwrap_or(1.0) > 0.0,
+                        diameter: parts[2].parse().unwrap_or(0.0),
+                        center_x: parts[3].parse().unwrap_or(0.0),
+                        center_y: parts[4].parse().unwrap_or(0.0),
+                        rotation: parts.get(5).and_then(|s| s.parse().ok()),
+                    })
+                } else {
+                    None
+                }
+            }
+            Ok(4) => {
+                if parts.len() >= 4 {
+                    let num_points: usize = parts[2].parse().unwrap_or(0);
+                    let mut points = Vec::new();
+                    for i in 0..num_points {
+                        let x_idx = 3 + i * 2;
+                        let y_idx = 4 + i * 2;
+                        if x_idx < parts.len() && y_idx < parts.len() {
+                            let x: f64 = parts[x_idx].parse().unwrap_or(0.0);
+                            let y: f64 = parts[y_idx].parse().unwrap_or(0.0);
+                            points.push((x, y));
+                        }
+                    }
+                    Some(MacroPrimitive::Outline {
+                        exposure: parts[1].parse().unwrap_or(1.0) > 0.0,
+                        points,
+                        rotation: None,
+                    })
+                } else {
+                    None
+                }
+            }
+            Ok(5) => {
+                if parts.len() >= 6 {
+                    Some(MacroPrimitive::Polygon {
+                        exposure: parts[1].parse().unwrap_or(1.0) > 0.0,
+                        vertices: parts[2].parse().unwrap_or(3),
+                        center_x: parts[3].parse().unwrap_or(0.0),
+                        center_y: parts[4].parse().unwrap_or(0.0),
+                        diameter: parts[5].parse().unwrap_or(0.0),
+                        rotation: parts.get(6).and_then(|s| s.parse().ok()),
+                    })
+                } else {
+                    None
+                }
+            }
+            Ok(7) => {
+                if parts.len() >= 6 {
+                    Some(MacroPrimitive::Thermal {
+                        center_x: parts[1].parse().unwrap_or(0.0),
+                        center_y: parts[2].parse().unwrap_or(0.0),
+                        outer_diameter: parts[3].parse().unwrap_or(0.0),
+                        inner_diameter: parts[4].parse().unwrap_or(0.0),
+                        gap: parts[5].parse().unwrap_or(0.0),
+                        rotation: parts.get(6).and_then(|s| s.parse().ok()),
+                    })
+                } else {
+                    None
+                }
+            }
+            Ok(20) => {
+                if parts.len() >= 7 {
+                    Some(MacroPrimitive::VectorLine {
+                        exposure: parts[1].parse().unwrap_or(1.0) > 0.0,
+                        width: parts[2].parse().unwrap_or(0.0),
+                        start_x: parts[3].parse().unwrap_or(0.0),
+                        start_y: parts[4].parse().unwrap_or(0.0),
+                        end_x: parts[5].parse().unwrap_or(0.0),
+                        end_y: parts[6].parse().unwrap_or(0.0),
+                        rotation: parts.get(7).and_then(|s| s.parse().ok()),
+                    })
+                } else {
+                    None
+                }
+            }
+            Ok(21) => {
+                if parts.len() >= 6 {
+                    Some(MacroPrimitive::CenterLine {
+                        exposure: parts[1].parse().unwrap_or(1.0) > 0.0,
+                        width: parts[2].parse().unwrap_or(0.0),
+                        height: parts[3].parse().unwrap_or(0.0),
+                        center_x: parts[4].parse().unwrap_or(0.0),
+                        center_y: parts[5].parse().unwrap_or(0.0),
+                        rotation: parts.get(6).and_then(|s| s.parse().ok()),
+                    })
+                } else {
+                    None
+                }
+            }
+            _ => {
+                log::warn!("Unsupported primitive code: {}", parts[0]);
+                None
+            }
+        }
+    }
+
+    fn handle_step_and_repeat(&mut self, sr: &gerber_types::StepAndRepeat) {
+        match sr {
+            gerber_types::StepAndRepeat::Open { repeat_x, repeat_y, distance_x, distance_y } => {
+                self.step_repeat_active = true;
+                self.step_repeat_x = *repeat_x;
+                self.step_repeat_y = *repeat_y;
+                self.step_repeat_offset_x = *distance_x;
+                self.step_repeat_offset_y = *distance_y;
+                self.step_repeat_commands.clear();
+                log::debug!("Starting step and repeat: {}x{} with offset ({}, {})", 
+                           repeat_x, repeat_y, distance_x, distance_y);
+            }
+            gerber_types::StepAndRepeat::Close => {
+                self.finalize_step_and_repeat();
+                log::debug!("Ending step and repeat");
+            }
         }
     }
 
@@ -818,6 +958,7 @@ M02*"#;
         filename
     }
 
+
     #[test]
     fn test_from_file_success() {
         let filename = create_test_gerber_file();
@@ -870,5 +1011,14 @@ M02*"#;
 
         let _ = fs::remove_file(&filename);
         let _ = fs::remove_file(&output_filename);
+    }
+
+    #[test]
+    fn test_basic_rs274x_features() {
+        let filename = create_test_gerber_file();
+        let gerber = Gerber2SVG::from_file(&filename).unwrap().build();
+        let content = gerber.to_string();
+        assert!(content.contains("<svg"));
+        let _ = fs::remove_file(&filename);
     }
 }
