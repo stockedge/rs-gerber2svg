@@ -6,12 +6,10 @@ use gerber_parser::parser::parse_gerber;
 use gerber_types::{Aperture, Command, Coordinates, GCode, InterpolationMode};
 use gerber_types::{CoordinateOffset, FunctionCode};
 
-use svg;
 use svg::node::element::{path, Circle, Path, Rectangle};
 
 mod point;
 use crate::point::Point;
-
 
 pub struct Gerber2SVG {
     gerber_doc: GerberDoc,
@@ -31,7 +29,7 @@ pub struct Gerber2SVG {
 }
 
 impl Gerber2SVG {
-    /// Create instance from a Gerber file 
+    /// Create instance from a Gerber file
     /// * filename: `&str` path to the gerber file
     pub fn from_file(filename: &str) -> Result<Self, std::io::Error> {
         let file = File::open(filename)?;
@@ -41,39 +39,36 @@ impl Gerber2SVG {
         Ok(Self::from_gerber_doc(gerber_doc))
     }
 
-    /// Create Instance form GerberDoc struct
-    /// * gerber_doc: `GerberDoc` struct
+    /// Create Instance form `GerberDoc` struct
+    /// * `gerber_doc`: `GerberDoc` struct
+    #[must_use]
     pub fn from_gerber_doc(gerber_doc: GerberDoc) -> Self {
-        let s = Self {
-            gerber_doc: gerber_doc,
+        Self {
+            gerber_doc,
             scale: 1.0,
             draw_state: InterpolationMode::Linear,
             position: Point::new(0.0, 0.0),
             selected_aperture: None,
-            svg_document: svg::Document::new(),//.set("viewbox", (0, 0, 80, 80)),
+            svg_document: svg::Document::new(), //.set("viewbox", (0, 0, 80, 80)),
             current_path_data: path::Data::new(),
             min_x: f32::INFINITY,
             max_x: f32::NEG_INFINITY,
             min_y: f32::INFINITY,
             max_y: f32::NEG_INFINITY,
-        };
-
-        return s;
+        }
     }
 
-    
     /// Set the scale of the path and aperture. (Must be called **before** the build function)
     /// * scale : `f32` the scale value (> 0.0)
+    #[must_use]
     pub fn set_scale(mut self, scale: f32) -> Self {
-        
         if scale > 0.0 {
             self.scale = scale;
-        }
-        else{
+        } else {
             log::warn!("Scale value need to be greater than 0.0. Skip scale setting");
         }
 
-        return self;
+        self
     }
 
     /// Save the gerber as SVG file
@@ -92,6 +87,7 @@ impl Gerber2SVG {
     }
 
     /// Build the SVG
+    #[must_use]
     pub fn build(mut self) -> Self {
         log::debug!("Start building...");
         for c in &self.gerber_doc.commands.clone() {
@@ -104,7 +100,7 @@ impl Gerber2SVG {
                                     if self.draw_state == InterpolationMode::Linear {
                                         self.add_draw_segment(coord);
                                     } else {
-                                        self.add_arc_segment(coord, offset.as_ref().expect(format!("No offset coord with 'Circular' state\r\n{:#?}", c).as_str()))
+                                        self.add_arc_segment(coord, offset.as_ref().unwrap_or_else(|| panic!("No offset coord with 'Circular' state\r\n{c:#?}")));
                                     }
                                     self.move_position(coord);
                                 }
@@ -124,16 +120,16 @@ impl Gerber2SVG {
                                 self.selected_aperture = Some(
                                     self.gerber_doc
                                         .apertures
-                                        .get(&i)
-                                        .expect(format!("Unknown aperture id '{}'", i).as_str())
+                                        .get(i)
+                                        .unwrap_or_else(|| panic!("Unknown aperture id '{i}'"))
                                         .clone(),
-                                )
+                                );
                             }
                         },
                         FunctionCode::GCode(g) => match g {
                             GCode::InterpolationMode(im) => self.draw_state = *im,
-                            GCode::Comment(c) => log::info!("[COMMENT] \"{}\"", c),
-                            _ => log::error!("Unsupported GCode:\r\n{:#?}", g),
+                            GCode::Comment(c) => log::info!("[COMMENT] \"{c}\""),
+                            _ => log::error!("Unsupported GCode:\r\n{g:#?}"),
                         },
                         FunctionCode::MCode(_) => (),
                     }
@@ -142,10 +138,10 @@ impl Gerber2SVG {
             };
         }
 
-        return self;
+        self
     }
 
-    fn place_aperture(&mut self, coord: &Coordinates) -> () {
+    fn place_aperture(&mut self, coord: &Coordinates) {
         let target = Self::coordinate_to_float(coord);
         let target = (
             target.0.unwrap_or(self.position.x),
@@ -166,21 +162,23 @@ impl Gerber2SVG {
             .expect("No aperture selected")
         {
             Aperture::Circle(c) => {
-                let radius = (c.diameter / 2.0) * self.scale as f64;
+                let radius = (c.diameter / 2.0) * f64::from(self.scale);
                 let circle = Circle::new()
                     .set("cx", target.0)
                     .set("cy", target.1)
                     .set("r", radius)
                     .set("fill", "white");
                 doc = doc.add(circle);
+                #[allow(clippy::cast_possible_truncation)]
                 self.check_bbox(target.0, target.1, radius as f32, radius as f32);
             }
             Aperture::Rectangle(r) => {
-
-                let width = r.x * self.scale as f64;
-                let height = r.y * self.scale as f64;
+                let width = r.x * f64::from(self.scale);
+                let height = r.y * f64::from(self.scale);
+                #[allow(clippy::cast_possible_truncation)]
                 let x = target.0 - (width / 2.0) as f32;
-                let y = target.1 - (width / 2.0) as f32;
+                #[allow(clippy::cast_possible_truncation)]
+                let y = target.1 - (height / 2.0) as f32;
 
                 let rect = Rectangle::new()
                     .set("x", x)
@@ -189,17 +187,23 @@ impl Gerber2SVG {
                     .set("height", height)
                     .set("fill", "white");
                 doc = doc.add(rect);
-                self.check_bbox(target.0, target.1, (width / 2.0) as f32, (height / 2.0) as f32);
+                #[allow(clippy::cast_possible_truncation)]
+                self.check_bbox(
+                    target.0,
+                    target.1,
+                    (width / 2.0) as f32,
+                    (height / 2.0) as f32,
+                );
             }
-            Aperture::Obround(o) => log::error!("Unsupported Obround aperture:\r\n{:#?}", o),
-            Aperture::Polygon(p) => log::error!("Unsupported Polygon aperture:\r\n{:#?}", p),
-            Aperture::Other(o) => log::error!("Unsupported Other aperture:\r\n{:#?}", o),
+            Aperture::Obround(o) => log::error!("Unsupported Obround aperture:\r\n{o:#?}"),
+            Aperture::Polygon(p) => log::error!("Unsupported Polygon aperture:\r\n{p:#?}"),
+            Aperture::Other(o) => log::error!("Unsupported Other aperture:\r\n{o:#?}"),
         }
 
         self.svg_document = doc;
     }
 
-    fn add_draw_segment(&mut self, coord: &Coordinates) -> () {
+    fn add_draw_segment(&mut self, coord: &Coordinates) {
         let target = Self::coordinate_to_float(coord);
         let target = (
             target.0.unwrap_or(self.position.x),
@@ -219,7 +223,7 @@ impl Gerber2SVG {
         self.check_bbox(target.0, target.1, stroke / 2.0, stroke / 2.0);
     }
 
-    fn add_arc_segment(&mut self, coord: &Coordinates, offset: &CoordinateOffset) -> () {
+    fn add_arc_segment(&self, coord: &Coordinates, offset: &CoordinateOffset) {
         log::debug!(
             "Draw arc from {:?} to {:?} with offset {:?}",
             self.position,
@@ -230,7 +234,7 @@ impl Gerber2SVG {
         //TODO : self.check_bbox(...);
     }
 
-    fn move_position(&mut self, coord: &Coordinates) -> () {
+    fn move_position(&mut self, coord: &Coordinates) {
         let pos = Self::coordinate_to_float(coord);
 
         self.position.x = pos.0.unwrap_or(self.position.x);
@@ -246,8 +250,7 @@ impl Gerber2SVG {
 
         if self.scale > 1.0 {
             stroke *= 2.0;
-        }
-        else if self.scale < 1.0 {
+        } else if self.scale < 1.0 {
             stroke /= 2.0;
         }
 
@@ -264,20 +267,20 @@ impl Gerber2SVG {
     }
 
     fn get_path_stroke(&self) -> f32 {
-        return match self
+        if let Aperture::Circle(c) = self
             .selected_aperture
             .as_ref()
             .expect("No selected aperture for storke")
         {
-            Aperture::Circle(c) => c.diameter as f32,
-            _ => {
-                log::warn!(
-                    "Unsupported stroke aperture other than Circle.\r\n{:#?}",
-                    self.selected_aperture
-                );
-                0_f32
-            }
-        };
+            #[allow(clippy::cast_possible_truncation)]
+            { c.diameter as f32 }
+        } else {
+            log::warn!(
+                "Unsupported stroke aperture other than Circle.\r\n{:#?}",
+                self.selected_aperture
+            );
+            0_f32
+        }
     }
 
     fn coordinate_to_float(coord: &Coordinates) -> (Option<f32>, Option<f32>) {
@@ -292,7 +295,7 @@ impl Gerber2SVG {
                     .unwrap()
                     .parse::<f32>()
                     .unwrap()
-                    / 10_f32.powi(coord.format.decimal as i32),
+                    / 10_f32.powi(i32::from(coord.format.decimal)),
             );
         }
 
@@ -305,11 +308,11 @@ impl Gerber2SVG {
                     .unwrap()
                     .parse::<f32>()
                     .unwrap()
-                    / 10_f32.powi(coord.format.decimal as i32),
-            )
+                    / 10_f32.powi(i32::from(coord.format.decimal)),
+            );
         }
 
-        return result;
+        result
     }
 
     fn coordinate_offset_to_float(coord: &CoordinateOffset) -> (Option<f32>, Option<f32>) {
@@ -324,7 +327,7 @@ impl Gerber2SVG {
                     .unwrap()
                     .parse::<f32>()
                     .unwrap()
-                    / 10_f32.powi(coord.format.decimal as i32),
+                    / 10_f32.powi(i32::from(coord.format.decimal)),
             );
         }
 
@@ -337,32 +340,118 @@ impl Gerber2SVG {
                     .unwrap()
                     .parse::<f32>()
                     .unwrap()
-                    / 10_f32.powi(coord.format.decimal as i32),
-            )
+                    / 10_f32.powi(i32::from(coord.format.decimal)),
+            );
         }
 
-        return result;
+        result
     }
 
-    fn check_bbox(&mut self, pos_x: f32, pos_y: f32, stroke_x: f32, stroke_y: f32){
+    fn check_bbox(&mut self, pos_x: f32, pos_y: f32, stroke_x: f32, stroke_y: f32) {
         self.min_x = f32::min(pos_x - stroke_x, self.min_x);
         self.max_x = f32::max(pos_x + stroke_x, self.max_x);
         self.min_y = f32::min(pos_y - stroke_y, self.min_y);
         self.max_y = f32::max(pos_y + stroke_y, self.max_y);
     }
 
-    fn set_bbox(&mut self, crop: bool){
+    fn set_bbox(&mut self, crop: bool) {
         let mut doc = std::mem::replace(&mut self.svg_document, svg::Document::new());
 
-        if crop{
+        if crop {
             log::debug!("Crop enable");
-            doc = doc.set("viewbox", (self.min_x, self.min_y, self.max_x - self.min_x, self.max_y - self.min_y));
-        }
-        else{
+            doc = doc.set(
+                "viewbox",
+                (
+                    self.min_x,
+                    self.min_y,
+                    self.max_x - self.min_x,
+                    self.max_y - self.min_y,
+                ),
+            );
+        } else {
             log::debug!("Crop disable");
             doc = doc.set("viewbox", (0, 0, self.max_x, self.max_y));
         }
 
         self.svg_document = doc;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn create_test_gerber_file() -> NamedTempFile {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "G04 Test Gerber File*").unwrap();
+        writeln!(file, "%FSLAX23Y23*%").unwrap();
+        writeln!(file, "%MOMM*%").unwrap();
+        writeln!(file, "%ADD10C,0.1*%").unwrap();
+        writeln!(file, "D10*").unwrap();
+        writeln!(file, "X0Y0D02*").unwrap();
+        writeln!(file, "X1000Y1000D01*").unwrap();
+        writeln!(file, "M02*").unwrap();
+        file.flush().unwrap();
+        file
+    }
+
+    #[test]
+    fn test_from_file_success() {
+        let test_file = create_test_gerber_file();
+        let result = Gerber2SVG::from_file(test_file.path().to_str().unwrap());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_from_file_nonexistent() {
+        let result = Gerber2SVG::from_file("nonexistent.gbr");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_set_scale_positive() {
+        let test_file = create_test_gerber_file();
+        let gerber = Gerber2SVG::from_file(test_file.path().to_str().unwrap())
+            .unwrap()
+            .set_scale(2.0);
+        assert_eq!(gerber.scale, 2.0);
+    }
+
+    #[test]
+    fn test_set_scale_zero_or_negative() {
+        let test_file = create_test_gerber_file();
+        let gerber = Gerber2SVG::from_file(test_file.path().to_str().unwrap())
+            .unwrap()
+            .set_scale(-1.0);
+        assert_eq!(gerber.scale, 1.0);
+    }
+
+    #[test]
+    fn test_build_and_to_string() {
+        let test_file = create_test_gerber_file();
+        let mut gerber = Gerber2SVG::from_file(test_file.path().to_str().unwrap())
+            .unwrap()
+            .build();
+        let svg_content = gerber.to_string(false);
+        assert!(svg_content.contains("<svg"));
+        assert!(!svg_content.is_empty());
+    }
+
+    #[test]
+    fn test_save_svg() {
+        let test_file = create_test_gerber_file();
+        let mut gerber = Gerber2SVG::from_file(test_file.path().to_str().unwrap())
+            .unwrap()
+            .build();
+
+        let output_file = NamedTempFile::new().unwrap();
+        let result = gerber.save_svg(output_file.path().to_str().unwrap(), false);
+        assert!(result.is_ok());
+
+        let content = fs::read_to_string(output_file.path()).unwrap();
+        assert!(content.contains("<svg"));
     }
 }
