@@ -100,7 +100,7 @@ impl Gerber2SVG {
                                     if self.draw_state == InterpolationMode::Linear {
                                         self.add_draw_segment(coord);
                                     } else {
-                                        self.add_arc_segment(coord, offset.as_ref().expect(format!("No offset coord with 'Circular' state\r\n{:#?}", c).as_str()))
+                                        self.add_arc_segment(coord, offset.as_ref().expect(format!("No offset coord with 'Circular' state\r\n{c:#?}").as_str()))
                                     }
                                     self.move_position(coord);
                                 }
