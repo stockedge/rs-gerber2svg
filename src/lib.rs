@@ -810,6 +810,8 @@ X0Y0D02*
 X1000000Y0D01*
 M02*"#;
         fs::write(&filename, content).unwrap();
+        
+        assert!(std::path::Path::new(&filename).exists(), "Test file was not created successfully");
         filename
     }
 
