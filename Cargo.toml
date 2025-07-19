@@ -26,3 +26,15 @@ log = "0.4.19"
 simple_logger = "4.2.0"
 structopt = { version = "0.3.26", features = ["color", "suggestions", "wrap_help"] }
 svg = "0.13.1"
+
+[dev-dependencies]
+tempfile = "3.8"
+
+[lints.clippy]
+# Basic clippy configuration - allow existing patterns to avoid breaking changes
+expect_fun_call = "allow"
+needless_borrow = "allow"
+single_component_path_imports = "allow"
+redundant_field_names = "allow"
+unused_unit = "allow"
+needless_return = "allow"
