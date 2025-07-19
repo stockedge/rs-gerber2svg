@@ -639,29 +639,33 @@ impl Gerber2SVG {
         None
     }
 
-    fn parse_aperture_macro(&self, name: &str, definition: &str) -> ApertureMacro {
+    #[allow(dead_code)]
+    fn parse_aperture_macro(name: &str, definition: &str) -> ApertureMacro {
         let mut primitives = Vec::new();
-        
+
         for primitive_str in definition.split('*').filter(|s| !s.trim().is_empty()) {
-            if let Some(primitive) = self.parse_primitive(primitive_str.trim()) {
+            if let Some(primitive) = Self::parse_primitive(primitive_str.trim()) {
                 primitives.push(primitive);
             }
         }
-        
+
         ApertureMacro {
             name: name.to_string(),
             primitives,
         }
     }
 
-    fn parse_primitive(&self, primitive_str: &str) -> Option<MacroPrimitive> {
+    #[allow(dead_code, clippy::too_many_lines)]
+    fn parse_primitive(primitive_str: &str) -> Option<MacroPrimitive> {
         let parts: Vec<&str> = primitive_str.split(',').collect();
         if parts.is_empty() {
             return None;
         }
-        
+
         match parts[0].parse::<u32>() {
-            Ok(0) => Some(MacroPrimitive::Comment(parts.get(1).unwrap_or(&"").to_string())),
+            Ok(0) => Some(MacroPrimitive::Comment(
+                (*parts.get(1).unwrap_or(&"")).to_string(),
+            )),
             Ok(1) => {
                 if parts.len() >= 5 {
                     Some(MacroPrimitive::Circle {
@@ -763,15 +767,21 @@ impl Gerber2SVG {
 
     fn handle_step_and_repeat(&mut self, sr: &gerber_types::StepAndRepeat) {
         match sr {
-            gerber_types::StepAndRepeat::Open { repeat_x, repeat_y, distance_x, distance_y } => {
+            gerber_types::StepAndRepeat::Open {
+                repeat_x,
+                repeat_y,
+                distance_x,
+                distance_y,
+            } => {
                 self.step_repeat_active = true;
                 self.step_repeat_x = *repeat_x;
                 self.step_repeat_y = *repeat_y;
                 self.step_repeat_offset_x = *distance_x;
                 self.step_repeat_offset_y = *distance_y;
                 self.step_repeat_commands.clear();
-                log::debug!("Starting step and repeat: {}x{} with offset ({}, {})", 
-                           repeat_x, repeat_y, distance_x, distance_y);
+                log::debug!(
+                    "Starting step and repeat: {repeat_x}x{repeat_y} with offset ({distance_x}, {distance_y})"
+                );
             }
             gerber_types::StepAndRepeat::Close => {
                 self.finalize_step_and_repeat();
@@ -957,7 +967,6 @@ M02*"#;
         );
         filename
     }
-
 
     #[test]
     fn test_from_file_success() {
