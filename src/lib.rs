@@ -1052,7 +1052,7 @@ impl Gerber2SVG {
 
         while let Some(ch) = chars.next() {
             match ch {
-                ' ' | '\t' => {},
+                ' ' | '\t' => {}
                 '(' => tokens.push(Token::LeftParen),
                 ')' => tokens.push(Token::RightParen),
                 '+' | '-' | '/' => tokens.push(Token::Operator(ch)),
