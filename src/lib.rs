@@ -9,8 +9,8 @@
 use std::fs::File;
 use std::io::BufReader;
 
-use gerber_parser::gerber_doc::GerberDoc;
-use gerber_parser::parser::parse_gerber;
+use gerber_parser::GerberDoc;
+use gerber_parser::parse;
 use gerber_types::{Aperture, Command, Coordinates, ExtendedCode, GCode, InterpolationMode};
 use gerber_types::{CoordinateOffset, FunctionCode};
 
@@ -65,27 +65,26 @@ pub struct Gerber2SVG {
 }
 
 impl Gerber2SVG {
-    /// Creates a new Gerber2SVG instance from a Gerber file.
+    /// Creates a new `Gerber2SVG` instance from a Gerber file.
     /// 
     /// 
     /// 
-    /// use gerber2svg::Gerber2SVG;
     #[allow(clippy::missing_errors_doc)]
     pub fn from_file(filename: &str) -> Result<Self, std::io::Error> {
         let file = File::open(filename)?;
         let reader = BufReader::new(file);
-        let gerber_doc: GerberDoc = parse_gerber(reader);
+        let gerber_doc = parse(reader).map_err(|(_, e)| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Parse error: {e:?}"))
+        })?;
 
         Ok(Self::from_gerber_doc(gerber_doc))
     }
 
-    /// Creates a new Gerber2SVG instance from a parsed GerberDoc.
+    /// Creates a new `Gerber2SVG` instance from a parsed `GerberDoc`.
     /// 
-    /// * `gerber_doc` - A parsed GerberDoc structure containing Gerber commands
+    /// * `gerber_doc` - A parsed `GerberDoc` structure containing Gerber commands
     /// 
     /// 
-    /// use gerber2svg::Gerber2SVG;
-    /// use gerber_types::GerberDoc;
     /// 
     #[must_use]
     pub fn from_gerber_doc(gerber_doc: GerberDoc) -> Self {
@@ -157,46 +156,56 @@ impl Gerber2SVG {
     pub fn build(mut self) -> Self {
         log::debug!("Start building...");
 
-        for c in &self.gerber_doc.commands.clone() {
-            match c {
-                Command::FunctionCode(f) => match f {
-                    FunctionCode::DCode(d) => {
+        let commands: Vec<_> = self.gerber_doc.commands.iter()
+            .filter_map(|c| c.as_ref().ok().cloned())
+            .collect();
+        
+        for command in commands {
+            match command {
+                    Command::FunctionCode(f) => match f {
+                        FunctionCode::DCode(d) => {
                         log::debug!("DCode: {d:?}");
                         match d {
                             gerber_types::DCode::Operation(op) => match op {
                                 gerber_types::Operation::Interpolate(coord, offset) => {
                                     if let Some(offset) = offset {
-                                        self.add_arc_segment(coord, offset);
-                                    } else {
-                                        self.add_draw_segment(coord);
+                                        if let Some(c) = coord {
+                                            self.add_arc_segment(&c, &offset);
+                                        }
+                                    } else if let Some(c) = coord {
+                                        self.add_draw_segment(&c);
                                     }
                                 }
                                 gerber_types::Operation::Move(coord) => {
-                                    self.move_position(coord);
+                                    if let Some(c) = coord {
+                                        self.move_position(&c);
+                                    }
                                 }
                                 gerber_types::Operation::Flash(coord) => {
-                                    self.move_position(coord);
+                                    if let Some(c) = coord {
+                                        self.move_position(&c);
+                                    }
                                     self.place_aperture();
                                 }
                             },
                             gerber_types::DCode::SelectAperture(a) => {
                                 log::debug!("Select aperture: {a:?}");
-                                self.selected_aperture = self.gerber_doc.apertures.get(a).cloned();
+                                self.selected_aperture = self.gerber_doc.apertures.get(&a).cloned();
                             }
                         }
                     }
-                    FunctionCode::GCode(g) => match g {
-                        GCode::InterpolationMode(im) => self.draw_state = *im,
-                        GCode::Comment(c) => log::info!("[COMMENT] \"{c}\""),
+                        FunctionCode::GCode(g) => match g {
+                        GCode::InterpolationMode(im) => self.draw_state = im,
+                        GCode::Comment(c) => log::info!("[COMMENT] \"{c:?}\""),
                         GCode::RegionMode(true) => self.handle_region_start(),
                         GCode::RegionMode(false) => self.handle_region_end(),
                         _ => log::error!("Unsupported GCode:\r\n{g:#?}"),
                     },
-                    FunctionCode::MCode(_) => (),
-                },
-                Command::ExtendedCode(e) => {
-                    self.handle_extended_code(e);
-                }
+                        FunctionCode::MCode(_) => (),
+                    },
+                    Command::ExtendedCode(e) => {
+                        self.handle_extended_code(&e);
+                    }
             }
         }
 
@@ -369,8 +378,8 @@ impl Gerber2SVG {
                     radius as f32,
                 );
             }
-            Aperture::Other(o) => {
-                log::warn!("Other aperture type not yet supported: {o:#?}");
+            Aperture::Macro(name, params) => {
+                log::warn!("Aperture macro not yet supported: {name} with params {params:?}");
             }
         }
 
