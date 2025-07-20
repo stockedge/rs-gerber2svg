@@ -493,7 +493,7 @@ impl Gerber2SVG {
     }
 
     fn create_path_from_data(&mut self) {
-        if !format!("{:?}", self.current_path_data).is_empty() {
+        if !self.current_path_data.is_empty() {
             let mut doc = std::mem::replace(&mut self.svg_document, svg::Document::new());
 
             let stroke_color = self.get_path_stroke();
