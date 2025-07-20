@@ -1,16 +1,15 @@
-//! 
-//! 
-//! 
-//! 
-//! use gerber2svg::Gerber2SVG;
-//! 
-//! 
+//! # gerber2svg
+//!
+//! A library for converting Gerber (RS-274X) files to SVG format.
+//!
+//! This crate provides functionality to parse Gerber files and generate
+//! corresponding SVG representations for visualization and further processing.
 
 use std::fs::File;
 use std::io::BufReader;
 
-use gerber_parser::GerberDoc;
 use gerber_parser::parse;
+use gerber_parser::GerberDoc;
 use gerber_types::{Aperture, Command, Coordinates, ExtendedCode, GCode, InterpolationMode};
 use gerber_types::{CoordinateOffset, FunctionCode};
 
@@ -30,7 +29,6 @@ enum DrawingState {
     Normal,
     InRegion { path_data: path::Data },
 }
-
 
 pub struct Gerber2SVG {
     gerber_doc: GerberDoc,
@@ -57,7 +55,6 @@ pub struct Gerber2SVG {
     step_repeat_offset_y: f64,
     step_repeat_commands: Vec<Command>,
 
-
     min_x: f32,
     max_x: f32,
     min_y: f32,
@@ -66,26 +63,33 @@ pub struct Gerber2SVG {
 
 impl Gerber2SVG {
     /// Creates a new `Gerber2SVG` instance from a Gerber file.
-    /// 
-    /// 
-    /// 
+    ///
+    /// # Arguments
+    /// * `filename` - Path to the Gerber file to be converted
+    ///
+    /// # Errors
+    /// Returns an error if the file cannot be opened or parsed
     #[allow(clippy::missing_errors_doc)]
     pub fn from_file(filename: &str) -> Result<Self, std::io::Error> {
         let file = File::open(filename)?;
         let reader = BufReader::new(file);
         let gerber_doc = parse(reader).map_err(|(_, e)| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Parse error: {e:?}"))
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Parse error: {e:?}"),
+            )
         })?;
 
         Ok(Self::from_gerber_doc(gerber_doc))
     }
 
     /// Creates a new `Gerber2SVG` instance from a parsed `GerberDoc`.
-    /// 
+    ///
+    /// # Arguments
     /// * `gerber_doc` - A parsed `GerberDoc` structure containing Gerber commands
-    /// 
-    /// 
-    /// 
+    ///
+    /// # Returns
+    /// A new `Gerber2SVG` instance ready for configuration and building
     #[must_use]
     pub fn from_gerber_doc(gerber_doc: GerberDoc) -> Self {
         Self {
@@ -115,11 +119,13 @@ impl Gerber2SVG {
         }
     }
 
-    /// 
-    /// 
-    /// 
+    /// # Example
+    /// ```no_run
     /// use gerber2svg::Gerber2SVG;
+    /// let gerber = Gerber2SVG::from_file("example.gbr")?
     ///     .set_scale(2.0);
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
     #[must_use]
     pub fn set_scale(mut self, scale: f32) -> Self {
         if scale > 0.0 {
@@ -128,42 +134,55 @@ impl Gerber2SVG {
         self
     }
 
-    /// 
-    /// 
-    /// 
-    /// use gerber2svg::Gerber2SVG;
+    /// Saves the generated SVG to a file.
+    ///
+    /// # Arguments
+    /// * `filename` - Path where the SVG file will be saved
+    ///
+    /// # Errors
+    /// Returns an error if the file cannot be written
     #[allow(clippy::missing_errors_doc)]
     pub fn save_svg(&self, filename: &str) -> Result<(), std::io::Error> {
         svg::save(filename, &self.svg_document)
     }
 
-    /// 
-    /// 
+    /// Returns the SVG content as a string.
+    ///
+    /// # Example
+    /// ```no_run
     /// use gerber2svg::Gerber2SVG;
+    /// let gerber = Gerber2SVG::from_file("example.gbr")?.build();
     /// let svg_content = gerber.to_string();
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
     #[must_use]
     #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         self.svg_document.to_string()
     }
 
-    /// 
-    /// 
-    /// 
-    /// use gerber2svg::Gerber2SVG;
-    ///     .set_scale(1.5)
+    /// Processes the Gerber commands and builds the SVG document.
+    ///
+    /// This method must be called after all configuration methods
+    /// to generate the final SVG output.
+    ///
+    /// # Returns
+    /// Self for method chaining
     #[must_use]
     pub fn build(mut self) -> Self {
         log::debug!("Start building...");
 
-        let commands: Vec<_> = self.gerber_doc.commands.iter()
+        let commands: Vec<_> = self
+            .gerber_doc
+            .commands
+            .iter()
             .filter_map(|c| c.as_ref().ok().cloned())
             .collect();
-        
+
         for command in commands {
             match command {
-                    Command::FunctionCode(f) => match f {
-                        FunctionCode::DCode(d) => {
+                Command::FunctionCode(f) => match f {
+                    FunctionCode::DCode(d) => {
                         log::debug!("DCode: {d:?}");
                         match d {
                             gerber_types::DCode::Operation(op) => match op {
@@ -194,18 +213,18 @@ impl Gerber2SVG {
                             }
                         }
                     }
-                        FunctionCode::GCode(g) => match g {
+                    FunctionCode::GCode(g) => match g {
                         GCode::InterpolationMode(im) => self.draw_state = im,
                         GCode::Comment(c) => log::info!("[COMMENT] \"{c:?}\""),
                         GCode::RegionMode(true) => self.handle_region_start(),
                         GCode::RegionMode(false) => self.handle_region_end(),
                         _ => log::error!("Unsupported GCode:\r\n{g:#?}"),
                     },
-                        FunctionCode::MCode(_) => (),
-                    },
-                    Command::ExtendedCode(e) => {
-                        self.handle_extended_code(&e);
-                    }
+                    FunctionCode::MCode(_) => (),
+                },
+                Command::ExtendedCode(e) => {
+                    self.handle_extended_code(&e);
+                }
             }
         }
 
@@ -610,9 +629,6 @@ impl Gerber2SVG {
         }
     }
 
-
-
-
     fn handle_step_and_repeat(&mut self, sr: &gerber_types::StepAndRepeat) {
         match sr {
             gerber_types::StepAndRepeat::Open {
@@ -637,7 +653,6 @@ impl Gerber2SVG {
             }
         }
     }
-
 }
 
 #[cfg(test)]
@@ -648,7 +663,7 @@ mod tests {
     fn create_test_gerber_file() -> String {
         use std::sync::atomic::{AtomicU32, Ordering};
         static COUNTER: AtomicU32 = AtomicU32::new(0);
-        
+
         let unique_id = COUNTER.fetch_add(1, Ordering::SeqCst);
         let filename = format!("test_{}_{}.gbr", std::process::id(), unique_id);
         let content = r#"G04 Test Gerber file*
