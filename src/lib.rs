@@ -19,6 +19,15 @@ use svg::node::element::{path, Circle, Group, Path, Polygon, Rectangle};
 mod point;
 use crate::point::Point;
 
+#[derive(Debug, Clone)]
+enum Token {
+    Number(f64),
+    Variable(u32),
+    Operator(char),
+    LeftParen,
+    RightParen,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Polarity {
     Dark,
@@ -49,6 +58,10 @@ pub struct Gerber2SVG {
     mirror_y: bool,
     rotation: f64,
     scaling: f64,
+    aperture_rotation: f64,
+    aperture_scaling: f64,
+    aperture_mirror_x: bool,
+    aperture_mirror_y: bool,
 
     step_repeat_active: bool,
     step_repeat_x: u32,
@@ -114,6 +127,10 @@ impl Gerber2SVG {
             mirror_y: false,
             rotation: 0.0,
             scaling: 1.0,
+            aperture_rotation: 0.0,
+            aperture_scaling: 1.0,
+            aperture_mirror_x: false,
+            aperture_mirror_y: false,
             step_repeat_active: false,
             step_repeat_x: 1,
             step_repeat_y: 1,
@@ -204,12 +221,8 @@ impl Gerber2SVG {
                         match d {
                             gerber_types::DCode::Operation(op) => match op {
                                 gerber_types::Operation::Interpolate(coord, offset) => {
-                                    if let Some(offset) = offset {
-                                        if let Some(c) = coord {
-                                            self.add_arc_segment(&c, &offset);
-                                        }
-                                    } else if let Some(c) = coord {
-                                        self.add_draw_segment(&c);
+                                    if let Some(c) = coord {
+                                        self.add_draw_segment(&c, offset.as_ref());
                                     }
                                 }
                                 gerber_types::Operation::Move(coord) => {
@@ -434,7 +447,7 @@ impl Gerber2SVG {
         self.svg_document = doc;
     }
 
-    fn add_draw_segment(&mut self, coord: &Coordinates) {
+    fn add_draw_segment(&mut self, coord: &Coordinates, offset: Option<&CoordinateOffset>) {
         let target = Self::coordinate_to_float(coord);
         let transformed_target = self.apply_transformations(target.0, target.1);
 
@@ -452,11 +465,12 @@ impl Gerber2SVG {
                         .line_to((transformed_target.0, transformed_target.1));
                 }
             },
-            InterpolationMode::ClockwiseCircular => {
-                log::warn!("Clockwise circular interpolation not yet supported");
-            }
-            InterpolationMode::CounterclockwiseCircular => {
-                log::warn!("Counterclockwise circular interpolation not yet supported");
+            InterpolationMode::ClockwiseCircular | InterpolationMode::CounterclockwiseCircular => {
+                if let Some(offset) = offset {
+                    self.add_arc_segment(coord, offset);
+                } else {
+                    log::warn!("Arc interpolation requires offset coordinates");
+                }
             }
         }
 
@@ -465,13 +479,52 @@ impl Gerber2SVG {
         self.check_bbox(transformed_target.0, transformed_target.1, 0.0, 0.0);
     }
 
-    fn add_arc_segment(&self, coord: &Coordinates, offset: &CoordinateOffset) {
-        log::debug!(
-            "Draw arc from {:?} to {:?} with offset {:?}",
-            self.position,
-            Self::coordinate_to_float(coord),
-            Self::coordinate_offset_to_float(offset)
-        );
+    #[allow(clippy::cast_possible_truncation)]
+    fn add_arc_segment(&mut self, coord: &Coordinates, offset: &CoordinateOffset) {
+        let end_point = Self::coordinate_to_float(coord);
+        let (i, j) = Self::coordinate_offset_to_float(offset);
+
+        let radius = f64::from(i.mul_add(i, j * j)).sqrt();
+
+        let sweep_flag = match self.draw_state {
+            InterpolationMode::ClockwiseCircular => 1,
+            InterpolationMode::CounterclockwiseCircular => 0,
+            InterpolationMode::Linear => {
+                log::warn!("Arc segment called with non-circular interpolation mode");
+                return;
+            }
+        };
+
+        match &mut self.drawing_state {
+            DrawingState::Normal => {
+                self.current_path_data = self.current_path_data.clone().elliptical_arc_to((
+                    end_point.0,
+                    end_point.1,
+                    radius as f32,
+                    radius as f32,
+                    0.0,
+                    0,
+                    sweep_flag,
+                ));
+            }
+            DrawingState::InRegion { path_data } => {
+                *path_data = path_data.clone().elliptical_arc_to((
+                    end_point.0,
+                    end_point.1,
+                    radius as f32,
+                    radius as f32,
+                    0.0,
+                    0,
+                    sweep_flag,
+                ));
+            }
+        }
+
+        self.position = Point {
+            x: end_point.0,
+            y: end_point.1,
+        };
+        self.check_bbox(end_point.0, end_point.1, 0.0, 0.0);
     }
 
     fn move_position(&mut self, coord: &Coordinates) {
@@ -599,6 +652,29 @@ impl Gerber2SVG {
             }
             ExtendedCode::ApertureBlock(block) => {
                 self.handle_aperture_block(block);
+            }
+            ExtendedCode::LoadMirroring(mirroring) => {
+                self.aperture_mirror_x = matches!(
+                    mirroring,
+                    gerber_types::Mirroring::X | gerber_types::Mirroring::XY
+                );
+                self.aperture_mirror_y = matches!(
+                    mirroring,
+                    gerber_types::Mirroring::Y | gerber_types::Mirroring::XY
+                );
+                log::debug!(
+                    "Set aperture mirroring: X={}, Y={}",
+                    self.aperture_mirror_x,
+                    self.aperture_mirror_y
+                );
+            }
+            ExtendedCode::LoadRotation(rotation) => {
+                self.aperture_rotation = rotation.rotation;
+                log::debug!("Set aperture rotation: {}", self.aperture_rotation);
+            }
+            ExtendedCode::LoadScaling(scaling) => {
+                self.aperture_scaling = scaling.scale;
+                log::debug!("Set aperture scaling: {}", self.aperture_scaling);
             }
             _ => {
                 log::debug!("Unsupported extended code: {extended_code:#?}");
@@ -748,6 +824,14 @@ impl Gerber2SVG {
                         let polygon_elem = self.render_macro_polygon(polygon, params);
                         group = group.add(polygon_elem);
                     }
+                    gerber_types::MacroContent::Moire(moire) => {
+                        let moire_elem = self.render_macro_moire(moire, params);
+                        group = group.add(moire_elem);
+                    }
+                    gerber_types::MacroContent::Thermal(thermal) => {
+                        let thermal_elem = self.render_macro_thermal(thermal, params);
+                        group = group.add(thermal_elem);
+                    }
                     _ => {
                         log::warn!("Unsupported macro primitive: {content:?}");
                     }
@@ -785,9 +869,8 @@ impl Gerber2SVG {
                         )
                 },
             ),
-            gerber_types::MacroDecimal::Expression(_expr) => {
-                log::warn!("Macro expressions not yet supported");
-                0.0
+            gerber_types::MacroDecimal::Expression(expr) => {
+                self.evaluate_macro_expression(expr, params)
             }
         }
     }
@@ -816,9 +899,8 @@ impl Gerber2SVG {
                         )
                 },
             ),
-            gerber_types::MacroBoolean::Expression(_expr) => {
-                log::warn!("Macro expressions not yet supported");
-                false
+            gerber_types::MacroBoolean::Expression(expr) => {
+                self.evaluate_macro_expression(expr, params) != 0.0
             }
         }
     }
@@ -951,6 +1033,325 @@ impl Gerber2SVG {
             .set("points", points.join(" "))
             .set("fill", if exposure { "white" } else { "black" })
             .set("stroke", "none")
+    }
+
+    fn evaluate_macro_expression(
+        &self,
+        expr: &str,
+        params: Option<&Vec<gerber_types::MacroDecimal>>,
+    ) -> f64 {
+        let tokens = Self::tokenize_expression(expr);
+        let resolved = self.resolve_variables(tokens, params);
+        let rpn = Self::to_rpn(resolved);
+        Self::evaluate_rpn(&rpn)
+    }
+
+    fn tokenize_expression(expr: &str) -> Vec<Token> {
+        let mut tokens = Vec::new();
+        let mut chars = expr.chars().peekable();
+
+        while let Some(ch) = chars.next() {
+            match ch {
+                ' ' | '\t' => continue,
+                '(' => tokens.push(Token::LeftParen),
+                ')' => tokens.push(Token::RightParen),
+                '+' | '-' | '/' => tokens.push(Token::Operator(ch)),
+                'x' | 'X' => tokens.push(Token::Operator('*')),
+                '$' => {
+                    let mut var_num = String::new();
+                    while let Some(&digit) = chars.peek() {
+                        if digit.is_ascii_digit() {
+                            var_num.push(chars.next().unwrap());
+                        } else {
+                            break;
+                        }
+                    }
+                    if let Ok(num) = var_num.parse::<u32>() {
+                        tokens.push(Token::Variable(num));
+                    }
+                }
+                _ if ch.is_ascii_digit() || ch == '.' => {
+                    let mut number = String::new();
+                    number.push(ch);
+                    while let Some(&next_ch) = chars.peek() {
+                        if next_ch.is_ascii_digit() || next_ch == '.' {
+                            number.push(chars.next().unwrap());
+                        } else {
+                            break;
+                        }
+                    }
+                    if let Ok(num) = number.parse::<f64>() {
+                        tokens.push(Token::Number(num));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        tokens
+    }
+
+    fn resolve_variables(
+        &self,
+        tokens: Vec<Token>,
+        params: Option<&Vec<gerber_types::MacroDecimal>>,
+    ) -> Vec<Token> {
+        tokens
+            .into_iter()
+            .map(|token| match token {
+                Token::Variable(var_num) => {
+                    let value = params.map_or_else(
+                        || {
+                            log::warn!("No parameters provided for macro variable ${var_num}");
+                            0.0
+                        },
+                        |params| {
+                            params
+                                .get((var_num as usize).saturating_sub(1))
+                                .map_or_else(
+                                    || {
+                                        log::warn!(
+                                            "Macro variable ${var_num} not found in parameters"
+                                        );
+                                        0.0
+                                    },
+                                    |param| self.evaluate_macro_decimal(param, None),
+                                )
+                        },
+                    );
+                    Token::Number(value)
+                }
+                other => other,
+            })
+            .collect()
+    }
+
+    fn to_rpn(tokens: Vec<Token>) -> Vec<Token> {
+        let mut output = Vec::new();
+        let mut operators = Vec::new();
+
+        for token in tokens {
+            match token {
+                Token::Number(_) => output.push(token),
+                Token::Operator(op) => {
+                    while let Some(Token::Operator(top_op)) = operators.last() {
+                        let precedence = |o: char| match o {
+                            '+' | '-' => 1,
+                            '*' | '/' => 2,
+                            _ => 0,
+                        };
+
+                        if precedence(*top_op) >= precedence(op) {
+                            output.push(operators.pop().unwrap());
+                        } else {
+                            break;
+                        }
+                    }
+                    operators.push(token);
+                }
+                Token::LeftParen => operators.push(token),
+                Token::RightParen => {
+                    while let Some(op) = operators.pop() {
+                        if matches!(op, Token::LeftParen) {
+                            break;
+                        }
+                        output.push(op);
+                    }
+                }
+                Token::Variable(_) => {}
+            }
+        }
+
+        while let Some(op) = operators.pop() {
+            output.push(op);
+        }
+
+        output
+    }
+
+    fn evaluate_rpn(rpn: &[Token]) -> f64 {
+        let mut stack = Vec::new();
+
+        for token in rpn {
+            match token {
+                Token::Number(n) => stack.push(*n),
+                Token::Operator(op) => {
+                    if stack.len() >= 2 {
+                        let b = stack.pop().unwrap();
+                        let a = stack.pop().unwrap();
+                        let result = match op {
+                            '+' => a + b,
+                            '-' => a - b,
+                            '*' => a * b,
+                            '/' => {
+                                if b == 0.0 {
+                                    0.0
+                                } else {
+                                    a / b
+                                }
+                            }
+                            _ => 0.0,
+                        };
+                        stack.push(result);
+                    }
+                }
+                Token::Variable(_) | Token::LeftParen | Token::RightParen => {}
+            }
+        }
+
+        stack.pop().unwrap_or(0.0)
+    }
+
+    fn render_macro_moire(
+        &self,
+        moire: &gerber_types::MoirePrimitive,
+        params: Option<&Vec<gerber_types::MacroDecimal>>,
+    ) -> Group {
+        let mut group = Group::new();
+
+        let center_x = self.evaluate_macro_decimal(&moire.center.0, params);
+        let center_y = self.evaluate_macro_decimal(&moire.center.1, params);
+        let outer_diameter = self.evaluate_macro_decimal(&moire.diameter, params);
+        let ring_thickness = self.evaluate_macro_decimal(&moire.ring_thickness, params);
+        let gap = self.evaluate_macro_decimal(&moire.gap, params);
+        let max_rings = moire.max_rings;
+        let crosshair_thickness = self.evaluate_macro_decimal(&moire.cross_hair_thickness, params);
+        let crosshair_length = self.evaluate_macro_decimal(&moire.cross_hair_length, params);
+        let rotation = self.evaluate_macro_decimal(&moire.angle, params);
+
+        if rotation != 0.0 {
+            group = group.set(
+                "transform",
+                format!(
+                    "rotate({} {} {})",
+                    rotation,
+                    center_x * f64::from(self.scale),
+                    center_y * f64::from(self.scale)
+                ),
+            );
+        }
+
+        let mut current_diameter = outer_diameter;
+        for _i in 0..max_rings {
+            if current_diameter <= 0.0 {
+                break;
+            }
+
+            let outer_circle = Circle::new()
+                .set("cx", center_x * f64::from(self.scale))
+                .set("cy", center_y * f64::from(self.scale))
+                .set("r", (current_diameter / 2.0) * f64::from(self.scale))
+                .set("fill", "white")
+                .set("stroke", "none");
+
+            group = group.add(outer_circle);
+
+            let inner_diameter = ring_thickness.mul_add(-2.0, current_diameter);
+            if inner_diameter > 0.0 {
+                let inner_circle = Circle::new()
+                    .set("cx", center_x * f64::from(self.scale))
+                    .set("cy", center_y * f64::from(self.scale))
+                    .set("r", (inner_diameter / 2.0) * f64::from(self.scale))
+                    .set("fill", "black")
+                    .set("stroke", "none");
+
+                group = group.add(inner_circle);
+            }
+
+            current_diameter -= (ring_thickness + gap) * 2.0;
+        }
+
+        if crosshair_length > 0.0 && crosshair_thickness > 0.0 {
+            let h_line = Rectangle::new()
+                .set(
+                    "x",
+                    (center_x - crosshair_length / 2.0) * f64::from(self.scale),
+                )
+                .set(
+                    "y",
+                    (center_y - crosshair_thickness / 2.0) * f64::from(self.scale),
+                )
+                .set("width", crosshair_length * f64::from(self.scale))
+                .set("height", crosshair_thickness * f64::from(self.scale))
+                .set("fill", "white")
+                .set("stroke", "none");
+
+            let v_line = Rectangle::new()
+                .set(
+                    "x",
+                    (center_x - crosshair_thickness / 2.0) * f64::from(self.scale),
+                )
+                .set(
+                    "y",
+                    (center_y - crosshair_length / 2.0) * f64::from(self.scale),
+                )
+                .set("width", crosshair_thickness * f64::from(self.scale))
+                .set("height", crosshair_length * f64::from(self.scale))
+                .set("fill", "white")
+                .set("stroke", "none");
+
+            group = group.add(h_line).add(v_line);
+        }
+
+        group
+    }
+
+    fn render_macro_thermal(
+        &self,
+        thermal: &gerber_types::ThermalPrimitive,
+        params: Option<&Vec<gerber_types::MacroDecimal>>,
+    ) -> Group {
+        let mut group = Group::new();
+
+        let center_x = self.evaluate_macro_decimal(&thermal.center.0, params);
+        let center_y = self.evaluate_macro_decimal(&thermal.center.1, params);
+        let outer_diameter = self.evaluate_macro_decimal(&thermal.outer_diameter, params);
+        let inner_diameter = self.evaluate_macro_decimal(&thermal.inner_diameter, params);
+        let gap = self.evaluate_macro_decimal(&thermal.gap, params);
+        let rotation = self.evaluate_macro_decimal(&thermal.angle, params);
+
+        let outer_circle = Circle::new()
+            .set("cx", center_x * f64::from(self.scale))
+            .set("cy", center_y * f64::from(self.scale))
+            .set("r", (outer_diameter / 2.0) * f64::from(self.scale))
+            .set("fill", "white")
+            .set("stroke", "none");
+
+        let inner_circle = Circle::new()
+            .set("cx", center_x * f64::from(self.scale))
+            .set("cy", center_y * f64::from(self.scale))
+            .set("r", (inner_diameter / 2.0) * f64::from(self.scale))
+            .set("fill", "black")
+            .set("stroke", "none");
+
+        group = group.add(outer_circle).add(inner_circle);
+
+        for i in 0..4 {
+            let angle = f64::from(i).mul_add(90.0, rotation);
+            let gap_rect = Rectangle::new()
+                .set("x", (center_x - gap / 2.0) * f64::from(self.scale))
+                .set(
+                    "y",
+                    (center_y - outer_diameter / 2.0) * f64::from(self.scale),
+                )
+                .set("width", gap * f64::from(self.scale))
+                .set("height", outer_diameter * f64::from(self.scale))
+                .set("fill", "black")
+                .set("stroke", "none")
+                .set(
+                    "transform",
+                    format!(
+                        "rotate({} {} {})",
+                        angle,
+                        center_x * f64::from(self.scale),
+                        center_y * f64::from(self.scale)
+                    ),
+                );
+
+            group = group.add(gap_rect);
+        }
+
+        group
     }
 
     fn save_current_state(&self) -> (svg::node::element::path::Data, f32, f32) {
@@ -1138,5 +1539,107 @@ M02*"#;
         temp_file.write_all(content.as_bytes()).unwrap();
         temp_file.flush().unwrap();
         temp_file
+    }
+
+    #[test]
+    fn test_macro_expression_evaluation() {
+        let gerber_content = r#"G04 Test macro expressions*
+%FSLAX25Y25*%
+%MOMM*%
+%AMTEST*
+1,1,$1+$2,0,0*%
+%ADD10TEST,1.0X2.0*%
+D10*
+X0Y0D03*
+M02*"#;
+
+        let temp_file = create_test_gerber_file_with_content(gerber_content);
+        let gerber = Gerber2SVG::from_file(temp_file.path().to_str().unwrap())
+            .unwrap()
+            .build();
+        let content = gerber.to_string();
+        assert!(content.contains("<svg"));
+    }
+
+    #[test]
+    fn test_arc_interpolation() {
+        let gerber_content = r#"G04 Test arc interpolation*
+%FSLAX25Y25*%
+%MOMM*%
+%ADD10C,0.1*%
+D10*
+G02*
+X1000000Y0I500000J0D01*
+G03*
+X0Y0I-500000J0D01*
+M02*"#;
+
+        let temp_file = create_test_gerber_file_with_content(gerber_content);
+        let gerber = Gerber2SVG::from_file(temp_file.path().to_str().unwrap())
+            .unwrap()
+            .build();
+        let content = gerber.to_string();
+        assert!(content.contains("<svg"));
+    }
+
+    #[test]
+    fn test_moire_primitive() {
+        let gerber_content = r#"G04 Test Moire primitive*
+%FSLAX25Y25*%
+%MOMM*%
+%AMMOIRE*
+6,0,0,5.0,0.5,0.1,3,0.1,1.0,0*%
+%ADD10MOIRE*%
+D10*
+X0Y0D03*
+M02*"#;
+
+        let temp_file = create_test_gerber_file_with_content(gerber_content);
+        let gerber = Gerber2SVG::from_file(temp_file.path().to_str().unwrap())
+            .unwrap()
+            .build();
+        let content = gerber.to_string();
+        assert!(content.contains("<svg"));
+    }
+
+    #[test]
+    fn test_thermal_primitive() {
+        let gerber_content = r#"G04 Test Thermal primitive*
+%FSLAX25Y25*%
+%MOMM*%
+%AMTHERMAL*
+7,0,0,2.0,1.0,0.2,0*%
+%ADD10THERMAL*%
+D10*
+X0Y0D03*
+M02*"#;
+
+        let temp_file = create_test_gerber_file_with_content(gerber_content);
+        let gerber = Gerber2SVG::from_file(temp_file.path().to_str().unwrap())
+            .unwrap()
+            .build();
+        let content = gerber.to_string();
+        assert!(content.contains("<svg"));
+    }
+
+    #[test]
+    fn test_aperture_transformations() {
+        let gerber_content = r#"G04 Test aperture transformations*
+%FSLAX25Y25*%
+%MOMM*%
+%ADD10C,1.0*%
+%LMX*%
+%LR45*%
+%LS2.0*%
+D10*
+X0Y0D03*
+M02*"#;
+
+        let temp_file = create_test_gerber_file_with_content(gerber_content);
+        let gerber = Gerber2SVG::from_file(temp_file.path().to_str().unwrap())
+            .unwrap()
+            .build();
+        let content = gerber.to_string();
+        assert!(content.contains("<svg"));
     }
 }
