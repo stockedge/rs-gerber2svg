@@ -5,6 +5,7 @@
 //! This crate provides functionality to parse Gerber files and generate
 //! corresponding SVG representations for visualization and further processing.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 
@@ -30,6 +31,7 @@ enum DrawingState {
     InRegion { path_data: path::Data },
 }
 
+#[allow(clippy::struct_excessive_bools)]
 pub struct Gerber2SVG {
     gerber_doc: GerberDoc,
     scale: f32,
@@ -54,6 +56,12 @@ pub struct Gerber2SVG {
     step_repeat_offset_x: f64,
     step_repeat_offset_y: f64,
     step_repeat_commands: Vec<Command>,
+
+    aperture_macros: HashMap<String, gerber_types::ApertureMacro>,
+    block_apertures: HashMap<i32, Vec<Command>>,
+    current_block_commands: Vec<Command>,
+    block_definition_active: bool,
+    current_block_code: Option<i32>,
 
     min_x: f32,
     max_x: f32,
@@ -112,6 +120,11 @@ impl Gerber2SVG {
             step_repeat_offset_x: 0.0,
             step_repeat_offset_y: 0.0,
             step_repeat_commands: Vec::new(),
+            aperture_macros: HashMap::new(),
+            block_apertures: HashMap::new(),
+            current_block_commands: Vec::new(),
+            block_definition_active: false,
+            current_block_code: None,
             min_x: f32::MAX,
             max_x: f32::MIN,
             min_y: f32::MAX,
@@ -398,7 +411,19 @@ impl Gerber2SVG {
                 );
             }
             Aperture::Macro(name, params) => {
-                log::warn!("Aperture macro not yet supported: {name} with params {params:?}");
+                let macro_group = self.render_aperture_macro(name, params.as_ref());
+                let positioned_group = Group::new()
+                    .set(
+                        "transform",
+                        format!(
+                            "translate({}, {})",
+                            self.position.x * self.scale,
+                            self.position.y * self.scale
+                        ),
+                    )
+                    .add(macro_group);
+
+                doc = doc.add(positioned_group);
             }
         }
 
@@ -554,6 +579,11 @@ impl Gerber2SVG {
 
     fn handle_extended_code(&mut self, extended_code: &ExtendedCode) {
         match extended_code {
+            ExtendedCode::ApertureMacro(macro_def) => {
+                self.aperture_macros
+                    .insert(macro_def.name.clone(), macro_def.clone());
+                log::debug!("Registered aperture macro: {}", macro_def.name);
+            }
             ExtendedCode::LoadPolarity(p) => {
                 self.set_polarity(match p {
                     gerber_types::Polarity::Dark => Polarity::Dark,
@@ -562,6 +592,9 @@ impl Gerber2SVG {
             }
             ExtendedCode::StepAndRepeat(sr) => {
                 self.handle_step_and_repeat(sr);
+            }
+            ExtendedCode::ApertureBlock(block) => {
+                self.handle_aperture_block(block);
             }
             _ => {
                 log::debug!("Unsupported extended code: {extended_code:#?}");
@@ -652,6 +685,261 @@ impl Gerber2SVG {
                 log::debug!("Ending step and repeat");
             }
         }
+    }
+
+    fn handle_aperture_block(&mut self, block: &gerber_types::ApertureBlock) {
+        match block {
+            gerber_types::ApertureBlock::Open { code } => {
+                self.block_definition_active = true;
+                self.current_block_code = Some(*code);
+                self.current_block_commands.clear();
+                log::debug!("Starting aperture block definition: {}", code);
+            }
+            gerber_types::ApertureBlock::Close => {
+                if let Some(code) = self.current_block_code.take() {
+                    self.block_apertures
+                        .insert(code, self.current_block_commands.clone());
+                    log::debug!("Completed aperture block definition: {}", code);
+                }
+                self.block_definition_active = false;
+                self.current_block_commands.clear();
+            }
+        }
+    }
+
+    fn render_aperture_macro(
+        &self,
+        name: &str,
+        params: Option<&Vec<gerber_types::MacroDecimal>>,
+    ) -> Group {
+        let mut group = Group::new();
+
+        if let Some(macro_def) = self.aperture_macros.get(name) {
+            for content in &macro_def.content {
+                match content {
+                    gerber_types::MacroContent::Circle(circle) => {
+                        let circle_elem = self.render_macro_circle(circle, params);
+                        group = group.add(circle_elem);
+                    }
+                    gerber_types::MacroContent::VectorLine(line) => {
+                        let line_elem = self.render_macro_vector_line(line, params);
+                        group = group.add(line_elem);
+                    }
+                    gerber_types::MacroContent::CenterLine(line) => {
+                        let line_elem = self.render_macro_center_line(line, params);
+                        group = group.add(line_elem);
+                    }
+                    gerber_types::MacroContent::Outline(outline) => {
+                        let outline_elem = self.render_macro_outline(outline, params);
+                        group = group.add(outline_elem);
+                    }
+                    gerber_types::MacroContent::Polygon(polygon) => {
+                        let polygon_elem = self.render_macro_polygon(polygon, params);
+                        group = group.add(polygon_elem);
+                    }
+                    _ => {
+                        log::warn!("Unsupported macro primitive: {:?}", content);
+                    }
+                }
+            }
+        } else {
+            log::warn!("Aperture macro not found: {}", name);
+        }
+
+        group
+    }
+
+    #[allow(clippy::only_used_in_recursion)]
+    fn evaluate_macro_decimal(
+        &self,
+        value: &gerber_types::MacroDecimal,
+        params: Option<&Vec<gerber_types::MacroDecimal>>,
+    ) -> f64 {
+        match value {
+            gerber_types::MacroDecimal::Value(v) => *v,
+            gerber_types::MacroDecimal::Variable(var_num) => params.map_or_else(
+                || {
+                    log::warn!("No parameters provided for macro variable ${}", var_num);
+                    0.0
+                },
+                |params| {
+                    params
+                        .get((*var_num as usize).saturating_sub(1))
+                        .map_or_else(
+                            || {
+                                log::warn!("Macro variable ${} not found in parameters", var_num);
+                                0.0
+                            },
+                            |param| self.evaluate_macro_decimal(param, None),
+                        )
+                },
+            ),
+            gerber_types::MacroDecimal::Expression(_expr) => {
+                log::warn!("Macro expressions not yet supported");
+                0.0
+            }
+        }
+    }
+
+    fn evaluate_macro_boolean(
+        &self,
+        value: &gerber_types::MacroBoolean,
+        params: Option<&Vec<gerber_types::MacroDecimal>>,
+    ) -> bool {
+        match value {
+            gerber_types::MacroBoolean::Value(v) => *v,
+            gerber_types::MacroBoolean::Variable(var_num) => params.map_or_else(
+                || {
+                    log::warn!("No parameters provided for macro variable ${}", var_num);
+                    false
+                },
+                |params| {
+                    params
+                        .get((*var_num as usize).saturating_sub(1))
+                        .map_or_else(
+                            || {
+                                log::warn!("Macro variable ${} not found in parameters", var_num);
+                                false
+                            },
+                            |param| self.evaluate_macro_decimal(param, None) != 0.0,
+                        )
+                },
+            ),
+            gerber_types::MacroBoolean::Expression(_expr) => {
+                log::warn!("Macro expressions not yet supported");
+                false
+            }
+        }
+    }
+
+    fn render_macro_circle(
+        &self,
+        circle: &gerber_types::CirclePrimitive,
+        params: Option<&Vec<gerber_types::MacroDecimal>>,
+    ) -> Circle {
+        let diameter = self.evaluate_macro_decimal(&circle.diameter, params);
+        let center_x = self.evaluate_macro_decimal(&circle.center.0, params);
+        let center_y = self.evaluate_macro_decimal(&circle.center.1, params);
+        let exposure = self.evaluate_macro_boolean(&circle.exposure, params);
+
+        Circle::new()
+            .set("cx", center_x * f64::from(self.scale))
+            .set("cy", center_y * f64::from(self.scale))
+            .set("r", (diameter / 2.0) * f64::from(self.scale))
+            .set("fill", if exposure { "white" } else { "black" })
+            .set("stroke", "none")
+    }
+
+    fn render_macro_vector_line(
+        &self,
+        line: &gerber_types::VectorLinePrimitive,
+        params: Option<&Vec<gerber_types::MacroDecimal>>,
+    ) -> Path {
+        let width = self.evaluate_macro_decimal(&line.width, params);
+        let start_x = self.evaluate_macro_decimal(&line.start.0, params);
+        let start_y = self.evaluate_macro_decimal(&line.start.1, params);
+        let end_x = self.evaluate_macro_decimal(&line.end.0, params);
+        let end_y = self.evaluate_macro_decimal(&line.end.1, params);
+        let exposure = self.evaluate_macro_boolean(&line.exposure, params);
+
+        let path_data = path::Data::new()
+            .move_to((
+                start_x * f64::from(self.scale),
+                start_y * f64::from(self.scale),
+            ))
+            .line_to((end_x * f64::from(self.scale), end_y * f64::from(self.scale)));
+
+        Path::new()
+            .set("d", path_data)
+            .set("stroke", if exposure { "white" } else { "black" })
+            .set("stroke-width", width * f64::from(self.scale))
+            .set("stroke-linecap", "round")
+            .set("fill", "none")
+    }
+
+    fn render_macro_center_line(
+        &self,
+        line: &gerber_types::CenterLinePrimitive,
+        params: Option<&Vec<gerber_types::MacroDecimal>>,
+    ) -> Rectangle {
+        let width = self.evaluate_macro_decimal(&line.dimensions.0, params);
+        let height = self.evaluate_macro_decimal(&line.dimensions.1, params);
+        let center_x = self.evaluate_macro_decimal(&line.center.0, params);
+        let center_y = self.evaluate_macro_decimal(&line.center.1, params);
+        let exposure = self.evaluate_macro_boolean(&line.exposure, params);
+
+        Rectangle::new()
+            .set("x", (center_x - width / 2.0) * f64::from(self.scale))
+            .set("y", (center_y - height / 2.0) * f64::from(self.scale))
+            .set("width", width * f64::from(self.scale))
+            .set("height", height * f64::from(self.scale))
+            .set("fill", if exposure { "white" } else { "black" })
+            .set("stroke", "none")
+    }
+
+    fn render_macro_outline(
+        &self,
+        outline: &gerber_types::OutlinePrimitive,
+        params: Option<&Vec<gerber_types::MacroDecimal>>,
+    ) -> Path {
+        let exposure = self.evaluate_macro_boolean(&outline.exposure, params);
+        let mut path_data = path::Data::new();
+
+        if let Some(first_point) = outline.points.first() {
+            let x = self.evaluate_macro_decimal(&first_point.0, params);
+            let y = self.evaluate_macro_decimal(&first_point.1, params);
+            path_data = path_data.move_to((x * f64::from(self.scale), y * f64::from(self.scale)));
+
+            for point in outline.points.iter().skip(1) {
+                let x = self.evaluate_macro_decimal(&point.0, params);
+                let y = self.evaluate_macro_decimal(&point.1, params);
+                path_data =
+                    path_data.line_to((x * f64::from(self.scale), y * f64::from(self.scale)));
+            }
+        }
+
+        Path::new()
+            .set("d", path_data)
+            .set("fill", if exposure { "white" } else { "black" })
+            .set("stroke", "none")
+            .set("fill-rule", "evenodd")
+    }
+
+    fn render_macro_polygon(
+        &self,
+        polygon: &gerber_types::PolygonPrimitive,
+        params: Option<&Vec<gerber_types::MacroDecimal>>,
+    ) -> Polygon {
+        let center_x = self.evaluate_macro_decimal(&polygon.center.0, params);
+        let center_y = self.evaluate_macro_decimal(&polygon.center.1, params);
+        let diameter = self.evaluate_macro_decimal(&polygon.diameter, params);
+        let exposure = self.evaluate_macro_boolean(&polygon.exposure, params);
+
+        let vertices = if let gerber_types::MacroInteger::Value(v) = &polygon.vertices {
+            *v
+        } else {
+            log::warn!("Variable vertices not supported for macro polygons");
+            6
+        };
+
+        let radius = diameter / 2.0;
+        let mut points = Vec::new();
+
+        for i in 0..vertices {
+            let angle = 2.0 * std::f64::consts::PI * f64::from(i) / f64::from(vertices);
+            let x = radius.mul_add(angle.cos(), center_x);
+            let y = radius.mul_add(angle.sin(), center_y);
+            points.push(format!(
+                "{},{}",
+                x * f64::from(self.scale),
+                y * f64::from(self.scale)
+            ));
+        }
+
+        Polygon::new()
+            .set("points", points.join(" "))
+            .set("fill", if exposure { "white" } else { "black" })
+            .set("stroke", "none")
     }
 }
 
@@ -744,5 +1032,68 @@ M02*"#;
         let content = gerber.to_string();
         assert!(content.contains("<svg"));
         let _ = fs::remove_file(&filename);
+    }
+
+    #[test]
+    fn test_aperture_macro_circle() {
+        let gerber_content = r#"G04 Test Gerber with aperture macro*
+%FSLAX36Y36*%
+%MOMM*%
+%AMCIRCLE*
+1,1,$1,$2,$3*
+%
+%ADD10CIRCLE,0.5,0,0*%
+D10*
+X0Y0D03*
+M02*"#;
+
+        let filename = create_test_gerber_file_with_content(gerber_content);
+        let result = Gerber2SVG::from_file(&filename);
+        assert!(result.is_ok());
+
+        let gerber = result.unwrap().build();
+        let svg_content = gerber.to_string();
+        assert!(svg_content.contains("<svg"));
+
+        let _ = fs::remove_file(&filename);
+    }
+
+    #[test]
+    fn test_aperture_block() {
+        let gerber_content = r#"G04 Test Gerber with aperture block*
+%FSLAX36Y36*%
+%MOMM*%
+%ADD10C,0.1*%
+%AB102*%
+D10*
+X0Y0D03*
+X1000000Y0D03*
+%AB*%
+M02*"#;
+
+        let filename = create_test_gerber_file_with_content(gerber_content);
+        let result = Gerber2SVG::from_file(&filename);
+        assert!(result.is_ok());
+
+        let gerber = result.unwrap().build();
+        let svg_content = gerber.to_string();
+        assert!(svg_content.contains("<svg"));
+
+        let _ = fs::remove_file(&filename);
+    }
+
+    fn create_test_gerber_file_with_content(content: &str) -> String {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+
+        let unique_id = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let filename = format!("test_{}_{}.gbr", std::process::id(), unique_id);
+        fs::write(&filename, content).unwrap();
+
+        assert!(
+            std::path::Path::new(&filename).exists(),
+            "Test file was not created successfully"
+        );
+        filename
     }
 }

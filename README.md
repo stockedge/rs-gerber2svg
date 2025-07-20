@@ -16,17 +16,17 @@ The generated SVG files contain individual geometric elements (paths, rectangles
 - **Draw Commands**: Linear and arc interpolation with D01/D02/D03 codes
 - **Region Statements**: G36/G37 filled regions with proper polarity handling
 - **Polarity Control**: LPD (Dark) and LPC (Clear) polarity switching
+- **Aperture Macros (AM)**: Circle, VectorLine, CenterLine, Outline, and Polygon primitives
+- **Step and Repeat (SR)**: Complete panelization functionality
+- **Block Apertures (AB)**: Complex shape definition and reuse
 - **Coordinate Systems**: Support for various coordinate formats and units
 - **Scaling**: Configurable scaling of output SVG
 - **File I/O**: Read Gerber files and save/output SVG files
 
-### ❌ Current Limitations
-- **Aperture Macros (AM)**: Not supported due to parser limitations
-- **Step and Repeat (SR)**: Infrastructure exists but parser doesn't recognize commands
-- **Aperture Transformations (LM/LR/LS)**: Not supported due to parser limitations
-- **Block Apertures (AB)**: Not supported due to parser limitations
-
-> **Note**: The underlying `gerber_parser` crate (v0.1.2) does not support advanced RS274X features. Future versions may add support as the parser ecosystem evolves.
+### ⚠️ Current Limitations
+- **Macro Expressions**: Arithmetic expressions in aperture macros (e.g., "$1+$2") are not yet evaluated
+- **Advanced Macro Primitives**: Moire and Thermal primitives have basic support
+- **Aperture Transformations**: LM/LR/LS commands are parsed but transformation application is limited
 
 ## Installation
 
