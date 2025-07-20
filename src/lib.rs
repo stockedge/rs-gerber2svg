@@ -153,7 +153,6 @@ impl Gerber2SVG {
     ///
     ///
     /// # Arguments
-    ///
     /// # Returns
     /// Self for method chaining
     ///
@@ -189,7 +188,6 @@ impl Gerber2SVG {
     /// This method converts the internal SVG document to its string representation,
     ///
     /// # Returns
-    ///
     /// # Example
     /// ```no_run
     /// use gerber2svg::Gerber2SVG;
