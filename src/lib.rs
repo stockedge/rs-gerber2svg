@@ -954,7 +954,11 @@ impl Gerber2SVG {
     }
 
     fn save_current_state(&self) -> (svg::node::element::path::Data, f32, f32) {
-        (self.current_path_data.clone(), self.position.x, self.position.y)
+        (
+            self.current_path_data.clone(),
+            self.position.x,
+            self.position.y,
+        )
     }
 
     fn restore_state(&mut self, state: (svg::node::element::path::Data, f32, f32)) {
@@ -1002,7 +1006,7 @@ G01*
 X0Y0D02*
 X1000000Y0D01*
 M02*"#;
-        
+
         let mut temp_file = tempfile::NamedTempFile::new().unwrap();
         temp_file.write_all(content.as_bytes()).unwrap();
         temp_file.flush().unwrap();
@@ -1025,21 +1029,27 @@ M02*"#;
     #[test]
     fn test_set_scale_positive() {
         let temp_file = create_test_gerber_file();
-        let gerber = Gerber2SVG::from_file(temp_file.path().to_str().unwrap()).unwrap().set_scale(2.0);
+        let gerber = Gerber2SVG::from_file(temp_file.path().to_str().unwrap())
+            .unwrap()
+            .set_scale(2.0);
         assert_eq!(gerber.scale, 2.0);
     }
 
     #[test]
     fn test_set_scale_zero_or_negative() {
         let temp_file = create_test_gerber_file();
-        let gerber = Gerber2SVG::from_file(temp_file.path().to_str().unwrap()).unwrap().set_scale(-1.0);
+        let gerber = Gerber2SVG::from_file(temp_file.path().to_str().unwrap())
+            .unwrap()
+            .set_scale(-1.0);
         assert_eq!(gerber.scale, 1.0);
     }
 
     #[test]
     fn test_build_and_to_string() {
         let temp_file = create_test_gerber_file();
-        let gerber = Gerber2SVG::from_file(temp_file.path().to_str().unwrap()).unwrap().build();
+        let gerber = Gerber2SVG::from_file(temp_file.path().to_str().unwrap())
+            .unwrap()
+            .build();
         let content = gerber.to_string();
         assert!(content.contains("<svg"));
     }
@@ -1048,11 +1058,13 @@ M02*"#;
     fn test_save_svg() {
         let temp_gerber = create_test_gerber_file();
         let temp_svg = tempfile::NamedTempFile::new().unwrap();
-        
-        let gerber = Gerber2SVG::from_file(temp_gerber.path().to_str().unwrap()).unwrap().build();
+
+        let gerber = Gerber2SVG::from_file(temp_gerber.path().to_str().unwrap())
+            .unwrap()
+            .build();
         let result = gerber.save_svg(temp_svg.path().to_str().unwrap());
         assert!(result.is_ok());
-        
+
         let content = fs::read_to_string(temp_svg.path()).unwrap();
         assert!(content.contains("<svg"));
     }
@@ -1070,7 +1082,9 @@ X1000000Y0D01*
 M02*"#;
 
         let temp_file = create_test_gerber_file_with_content(gerber_content);
-        let gerber = Gerber2SVG::from_file(temp_file.path().to_str().unwrap()).unwrap().build();
+        let gerber = Gerber2SVG::from_file(temp_file.path().to_str().unwrap())
+            .unwrap()
+            .build();
         let content = gerber.to_string();
         assert!(content.contains("<svg"));
     }
