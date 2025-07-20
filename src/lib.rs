@@ -149,6 +149,14 @@ impl Gerber2SVG {
         }
     }
 
+    /// Sets the scaling factor for the SVG output.
+    ///
+    ///
+    /// # Arguments
+    ///
+    /// # Returns
+    /// Self for method chaining
+    ///
     /// # Example
     /// ```no_run
     /// use gerber2svg::Gerber2SVG;
@@ -177,6 +185,10 @@ impl Gerber2SVG {
     }
 
     /// Returns the SVG content as a string.
+    ///
+    /// This method converts the internal SVG document to its string representation,
+    ///
+    /// # Returns
     ///
     /// # Example
     /// ```no_run
