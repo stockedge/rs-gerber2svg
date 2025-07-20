@@ -693,13 +693,13 @@ impl Gerber2SVG {
                 self.block_definition_active = true;
                 self.current_block_code = Some(*code);
                 self.current_block_commands.clear();
-                log::debug!("Starting aperture block definition: {}", code);
+                log::debug!("Starting aperture block definition: {code}");
             }
             gerber_types::ApertureBlock::Close => {
                 if let Some(code) = self.current_block_code.take() {
                     self.block_apertures
                         .insert(code, self.current_block_commands.clone());
-                    log::debug!("Completed aperture block definition: {}", code);
+                    log::debug!("Completed aperture block definition: {code}");
                 }
                 self.block_definition_active = false;
                 self.current_block_commands.clear();
@@ -738,7 +738,7 @@ impl Gerber2SVG {
                         group = group.add(polygon_elem);
                     }
                     _ => {
-                        log::warn!("Unsupported macro primitive: {:?}", content);
+                        log::warn!("Unsupported macro primitive: {content:?}");
                     }
                 }
             }
@@ -757,15 +757,23 @@ impl Gerber2SVG {
     ) -> f64 {
         match value {
             gerber_types::MacroDecimal::Value(v) => *v,
-            gerber_types::MacroDecimal::Variable(var_num) => {
-                params.map_or_else(|| {
+            gerber_types::MacroDecimal::Variable(var_num) => params.map_or_else(
+                || {
                     log::warn!("No parameters provided for macro variable ${var_num}");
                     0.0
-                }, |params| params.get((*var_num as usize).saturating_sub(1)).map_or_else(|| {
-                    log::warn!("Macro variable ${var_num} not found in parameters");
-                    0.0
-                }, |param| self.evaluate_macro_decimal(param, None)))
-            }
+                },
+                |params| {
+                    params
+                        .get((*var_num as usize).saturating_sub(1))
+                        .map_or_else(
+                            || {
+                                log::warn!("Macro variable ${var_num} not found in parameters");
+                                0.0
+                            },
+                            |param| self.evaluate_macro_decimal(param, None),
+                        )
+                },
+            ),
             gerber_types::MacroDecimal::Expression(_expr) => {
                 log::warn!("Macro expressions not yet supported");
                 0.0
@@ -780,15 +788,23 @@ impl Gerber2SVG {
     ) -> bool {
         match value {
             gerber_types::MacroBoolean::Value(v) => *v,
-            gerber_types::MacroBoolean::Variable(var_num) => {
-                params.map_or_else(|| {
+            gerber_types::MacroBoolean::Variable(var_num) => params.map_or_else(
+                || {
                     log::warn!("No parameters provided for macro variable ${var_num}");
                     false
-                }, |params| params.get((*var_num as usize).saturating_sub(1)).map_or_else(|| {
-                    log::warn!("Macro variable ${var_num} not found in parameters");
-                    false
-                }, |param| self.evaluate_macro_decimal(param, None) != 0.0))
-            }
+                },
+                |params| {
+                    params
+                        .get((*var_num as usize).saturating_sub(1))
+                        .map_or_else(
+                            || {
+                                log::warn!("Macro variable ${var_num} not found in parameters");
+                                false
+                            },
+                            |param| self.evaluate_macro_decimal(param, None) != 0.0,
+                        )
+                },
+            ),
             gerber_types::MacroBoolean::Expression(_expr) => {
                 log::warn!("Macro expressions not yet supported");
                 false
@@ -1020,7 +1036,7 @@ G01*
 X0Y0D02*
 X1000000Y0D01*
 M02*"#;
-        
+
         let filename = create_test_gerber_file_with_content(gerber_content);
         let gerber = Gerber2SVG::from_file(&filename).unwrap().build();
         let content = gerber.to_string();
