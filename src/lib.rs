@@ -646,7 +646,11 @@ mod tests {
     use std::fs;
 
     fn create_test_gerber_file() -> String {
-        let filename = format!("test_{}.gbr", std::process::id());
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        
+        let unique_id = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let filename = format!("test_{}_{}.gbr", std::process::id(), unique_id);
         let content = r#"G04 Test Gerber file*
 %FSLAX36Y36*%
 %MOMM*%
