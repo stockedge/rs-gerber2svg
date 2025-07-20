@@ -743,7 +743,7 @@ impl Gerber2SVG {
                 }
             }
         } else {
-            log::warn!("Aperture macro not found: {}", name);
+            log::warn!("Aperture macro not found: {name}");
         }
 
         group
@@ -757,23 +757,15 @@ impl Gerber2SVG {
     ) -> f64 {
         match value {
             gerber_types::MacroDecimal::Value(v) => *v,
-            gerber_types::MacroDecimal::Variable(var_num) => params.map_or_else(
-                || {
-                    log::warn!("No parameters provided for macro variable ${}", var_num);
+            gerber_types::MacroDecimal::Variable(var_num) => {
+                params.map_or_else(|| {
+                    log::warn!("No parameters provided for macro variable ${var_num}");
                     0.0
-                },
-                |params| {
-                    params
-                        .get((*var_num as usize).saturating_sub(1))
-                        .map_or_else(
-                            || {
-                                log::warn!("Macro variable ${} not found in parameters", var_num);
-                                0.0
-                            },
-                            |param| self.evaluate_macro_decimal(param, None),
-                        )
-                },
-            ),
+                }, |params| params.get((*var_num as usize).saturating_sub(1)).map_or_else(|| {
+                    log::warn!("Macro variable ${var_num} not found in parameters");
+                    0.0
+                }, |param| self.evaluate_macro_decimal(param, None)))
+            }
             gerber_types::MacroDecimal::Expression(_expr) => {
                 log::warn!("Macro expressions not yet supported");
                 0.0
@@ -788,23 +780,15 @@ impl Gerber2SVG {
     ) -> bool {
         match value {
             gerber_types::MacroBoolean::Value(v) => *v,
-            gerber_types::MacroBoolean::Variable(var_num) => params.map_or_else(
-                || {
-                    log::warn!("No parameters provided for macro variable ${}", var_num);
+            gerber_types::MacroBoolean::Variable(var_num) => {
+                params.map_or_else(|| {
+                    log::warn!("No parameters provided for macro variable ${var_num}");
                     false
-                },
-                |params| {
-                    params
-                        .get((*var_num as usize).saturating_sub(1))
-                        .map_or_else(
-                            || {
-                                log::warn!("Macro variable ${} not found in parameters", var_num);
-                                false
-                            },
-                            |param| self.evaluate_macro_decimal(param, None) != 0.0,
-                        )
-                },
-            ),
+                }, |params| params.get((*var_num as usize).saturating_sub(1)).map_or_else(|| {
+                    log::warn!("Macro variable ${var_num} not found in parameters");
+                    false
+                }, |param| self.evaluate_macro_decimal(param, None) != 0.0))
+            }
             gerber_types::MacroBoolean::Expression(_expr) => {
                 log::warn!("Macro expressions not yet supported");
                 false
@@ -1027,7 +1011,17 @@ M02*"#;
 
     #[test]
     fn test_basic_rs274x_features() {
-        let filename = create_test_gerber_file();
+        let gerber_content = r#"G04 Test Gerber file*
+%FSLAX36Y36*%
+%MOMM*%
+%ADD10C,0.1*%
+D10*
+G01*
+X0Y0D02*
+X1000000Y0D01*
+M02*"#;
+        
+        let filename = create_test_gerber_file_with_content(gerber_content);
         let gerber = Gerber2SVG::from_file(&filename).unwrap().build();
         let content = gerber.to_string();
         assert!(content.contains("<svg"));
