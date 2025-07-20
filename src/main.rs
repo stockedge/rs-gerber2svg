@@ -1,10 +1,9 @@
-use gerber2svg::Gerber2SVG;
 use clap::Parser;
+use gerber2svg::Gerber2SVG;
 
 // use crate::gerber_svg::GerberSVG;
 // mod gerber_svg;
 
-#[allow(dead_code)]
 #[derive(Debug, Parser)]
 #[command(name = "rusty-pcb", about = "Usage of rusty-pcb", version = "0.1.0")]
 struct Opt {
@@ -48,16 +47,16 @@ pub fn main() -> Result<(), std::io::Error> {
     }
 
     log::info!("Load gerber file...");
-    let mut gerber = Gerber2SVG::from_file(opt.gerber_file.as_str())?
+    let gerber = Gerber2SVG::from_file(opt.gerber_file.as_str())?
         .set_scale(opt.scale)
         .build();
 
     if opt.svg_file.is_some() {
         log::info!("Save SVG file...");
-        gerber.save_svg(&opt.svg_file.unwrap().as_str(), opt.crop)?;
+        gerber.save_svg(opt.svg_file.unwrap().as_str())?;
     } else {
         log::info!("Print SVG file...");
-        println!("{}", gerber.to_string(opt.crop));
+        println!("{}", gerber.to_string());
     }
 
     Ok(())
