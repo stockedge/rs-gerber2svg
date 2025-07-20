@@ -24,9 +24,9 @@ The generated SVG files contain individual geometric elements (paths, rectangles
 - **File I/O**: Read Gerber files and save/output SVG files
 
 ### ⚠️ Current Limitations
-- **Macro Expressions**: Arithmetic expressions in aperture macros (e.g., "$1+$2") are not yet evaluated
-- **Advanced Macro Primitives**: Moire and Thermal primitives have basic support
-- **Aperture Transformations**: LM/LR/LS commands are parsed but transformation application is limited
+- **Complex Macro Expressions**: Some advanced mathematical functions in aperture macros may not be fully supported
+- **Performance**: Large Gerber files with many repetitive elements may have slower processing times
+- **Validation**: Limited validation of malformed Gerber input files
 
 ## Installation
 
