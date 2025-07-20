@@ -193,6 +193,10 @@ impl Gerber2SVG {
             .collect();
 
         for command in commands {
+            if self.step_repeat_active {
+                self.step_repeat_commands.push(command.clone());
+            }
+
             match command {
                 Command::FunctionCode(f) => match f {
                     FunctionCode::DCode(d) => {
@@ -649,8 +653,15 @@ impl Gerber2SVG {
                     let offset_x = f64::from(x) * self.step_repeat_offset_x;
                     let offset_y = f64::from(y) * self.step_repeat_offset_y;
 
-                    let repeat_group =
+                    let mut repeat_group =
                         Group::new().set("transform", format!("translate({offset_x}, {offset_y})"));
+
+                    let saved_state = self.save_current_state();
+                    let commands_to_repeat = self.step_repeat_commands.clone();
+                    for cmd in &commands_to_repeat {
+                        self.process_command_for_repeat(cmd, &mut repeat_group);
+                    }
+                    self.restore_state(saved_state);
 
                     doc = doc.add(repeat_group);
                 }
@@ -941,19 +952,48 @@ impl Gerber2SVG {
             .set("fill", if exposure { "white" } else { "black" })
             .set("stroke", "none")
     }
+
+    fn save_current_state(&self) -> (svg::node::element::path::Data, f32, f32) {
+        (self.current_path_data.clone(), self.position.x, self.position.y)
+    }
+
+    fn restore_state(&mut self, state: (svg::node::element::path::Data, f32, f32)) {
+        self.current_path_data = state.0;
+        self.position.x = state.1;
+        self.position.y = state.2;
+    }
+
+    fn process_command_for_repeat(&mut self, command: &Command, group: &mut Group) {
+        if let Command::FunctionCode(FunctionCode::DCode(gerber_types::DCode::Operation(
+            gerber_types::Operation::Flash(coord),
+        ))) = command
+        {
+            if let Some(c) = coord {
+                self.move_position(c);
+            }
+            if let Some(aperture) = &self.selected_aperture {
+                let (x, y) = self.apply_transformations(self.position.x, self.position.y);
+                if let gerber_types::Aperture::Circle(circle) = aperture {
+                    let svg_circle = svg::node::element::Circle::new()
+                        .set("cx", f64::from(x))
+                        .set("cy", f64::from(y))
+                        .set("r", circle.diameter / 2.0 * f64::from(self.scale))
+                        .set("fill", "white");
+                    *group = std::mem::replace(group, Group::new()).add(svg_circle);
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+    use std::io::Write;
+    use tempfile;
 
-    fn create_test_gerber_file() -> String {
-        use std::sync::atomic::{AtomicU32, Ordering};
-        static COUNTER: AtomicU32 = AtomicU32::new(0);
-
-        let unique_id = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let filename = format!("test_{}_{}.gbr", std::process::id(), unique_id);
+    fn create_test_gerber_file() -> tempfile::NamedTempFile {
         let content = r#"G04 Test Gerber file*
 %FSLAX36Y36*%
 %MOMM*%
@@ -962,21 +1002,18 @@ G01*
 X0Y0D02*
 X1000000Y0D01*
 M02*"#;
-        fs::write(&filename, content).unwrap();
-
-        assert!(
-            std::path::Path::new(&filename).exists(),
-            "Test file was not created successfully"
-        );
-        filename
+        
+        let mut temp_file = tempfile::NamedTempFile::new().unwrap();
+        temp_file.write_all(content.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+        temp_file
     }
 
     #[test]
     fn test_from_file_success() {
-        let filename = create_test_gerber_file();
-        let result = Gerber2SVG::from_file(&filename);
+        let temp_file = create_test_gerber_file();
+        let result = Gerber2SVG::from_file(temp_file.path().to_str().unwrap());
         assert!(result.is_ok());
-        let _ = fs::remove_file(&filename);
     }
 
     #[test]
@@ -987,42 +1024,37 @@ M02*"#;
 
     #[test]
     fn test_set_scale_positive() {
-        let filename = create_test_gerber_file();
-        let gerber = Gerber2SVG::from_file(&filename).unwrap().set_scale(2.0);
+        let temp_file = create_test_gerber_file();
+        let gerber = Gerber2SVG::from_file(temp_file.path().to_str().unwrap()).unwrap().set_scale(2.0);
         assert_eq!(gerber.scale, 2.0);
-        let _ = fs::remove_file(&filename);
     }
 
     #[test]
     fn test_set_scale_zero_or_negative() {
-        let filename = create_test_gerber_file();
-        let gerber = Gerber2SVG::from_file(&filename).unwrap().set_scale(-1.0);
+        let temp_file = create_test_gerber_file();
+        let gerber = Gerber2SVG::from_file(temp_file.path().to_str().unwrap()).unwrap().set_scale(-1.0);
         assert_eq!(gerber.scale, 1.0);
-        let _ = fs::remove_file(&filename);
     }
 
     #[test]
     fn test_build_and_to_string() {
-        let filename = create_test_gerber_file();
-        let gerber = Gerber2SVG::from_file(&filename).unwrap().build();
+        let temp_file = create_test_gerber_file();
+        let gerber = Gerber2SVG::from_file(temp_file.path().to_str().unwrap()).unwrap().build();
         let content = gerber.to_string();
         assert!(content.contains("<svg"));
-        let _ = fs::remove_file(&filename);
     }
 
     #[test]
     fn test_save_svg() {
-        let filename = create_test_gerber_file();
-        let output_filename = format!("test_output_{}.svg", std::process::id());
-        let gerber = Gerber2SVG::from_file(&filename).unwrap().build();
-        let result = gerber.save_svg(&output_filename);
+        let temp_gerber = create_test_gerber_file();
+        let temp_svg = tempfile::NamedTempFile::new().unwrap();
+        
+        let gerber = Gerber2SVG::from_file(temp_gerber.path().to_str().unwrap()).unwrap().build();
+        let result = gerber.save_svg(temp_svg.path().to_str().unwrap());
         assert!(result.is_ok());
-
-        let content = fs::read_to_string(&output_filename).unwrap();
+        
+        let content = fs::read_to_string(temp_svg.path()).unwrap();
         assert!(content.contains("<svg"));
-
-        let _ = fs::remove_file(&filename);
-        let _ = fs::remove_file(&output_filename);
     }
 
     #[test]
@@ -1037,11 +1069,10 @@ X0Y0D02*
 X1000000Y0D01*
 M02*"#;
 
-        let filename = create_test_gerber_file_with_content(gerber_content);
-        let gerber = Gerber2SVG::from_file(&filename).unwrap().build();
+        let temp_file = create_test_gerber_file_with_content(gerber_content);
+        let gerber = Gerber2SVG::from_file(temp_file.path().to_str().unwrap()).unwrap().build();
         let content = gerber.to_string();
         assert!(content.contains("<svg"));
-        let _ = fs::remove_file(&filename);
     }
 
     #[test]
@@ -1057,15 +1088,13 @@ D10*
 X0Y0D03*
 M02*"#;
 
-        let filename = create_test_gerber_file_with_content(gerber_content);
-        let result = Gerber2SVG::from_file(&filename);
+        let temp_file = create_test_gerber_file_with_content(gerber_content);
+        let result = Gerber2SVG::from_file(temp_file.path().to_str().unwrap());
         assert!(result.is_ok());
 
         let gerber = result.unwrap().build();
         let svg_content = gerber.to_string();
         assert!(svg_content.contains("<svg"));
-
-        let _ = fs::remove_file(&filename);
     }
 
     #[test]
@@ -1081,29 +1110,19 @@ X1000000Y0D03*
 %AB*%
 M02*"#;
 
-        let filename = create_test_gerber_file_with_content(gerber_content);
-        let result = Gerber2SVG::from_file(&filename);
+        let temp_file = create_test_gerber_file_with_content(gerber_content);
+        let result = Gerber2SVG::from_file(temp_file.path().to_str().unwrap());
         assert!(result.is_ok());
 
         let gerber = result.unwrap().build();
         let svg_content = gerber.to_string();
         assert!(svg_content.contains("<svg"));
-
-        let _ = fs::remove_file(&filename);
     }
 
-    fn create_test_gerber_file_with_content(content: &str) -> String {
-        use std::sync::atomic::{AtomicU32, Ordering};
-        static COUNTER: AtomicU32 = AtomicU32::new(0);
-
-        let unique_id = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let filename = format!("test_{}_{}.gbr", std::process::id(), unique_id);
-        fs::write(&filename, content).unwrap();
-
-        assert!(
-            std::path::Path::new(&filename).exists(),
-            "Test file was not created successfully"
-        );
-        filename
+    fn create_test_gerber_file_with_content(content: &str) -> tempfile::NamedTempFile {
+        let mut temp_file = tempfile::NamedTempFile::new().unwrap();
+        temp_file.write_all(content.as_bytes()).unwrap();
+        temp_file.flush().unwrap();
+        temp_file
     }
 }
