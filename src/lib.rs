@@ -1,4 +1,11 @@
-use std::collections::HashMap;
+//! 
+//! 
+//! 
+//! 
+//! use gerber2svg::Gerber2SVG;
+//! 
+//! 
+
 use std::fs::File;
 use std::io::BufReader;
 
@@ -24,63 +31,7 @@ enum DrawingState {
     InRegion { path_data: path::Data },
 }
 
-#[derive(Debug, Clone)]
-pub enum MacroPrimitive {
-    Comment(String),
-    Circle {
-        exposure: bool,
-        diameter: f64,
-        center_x: f64,
-        center_y: f64,
-        rotation: Option<f64>,
-    },
-    VectorLine {
-        exposure: bool,
-        width: f64,
-        start_x: f64,
-        start_y: f64,
-        end_x: f64,
-        end_y: f64,
-        rotation: Option<f64>,
-    },
-    CenterLine {
-        exposure: bool,
-        width: f64,
-        height: f64,
-        center_x: f64,
-        center_y: f64,
-        rotation: Option<f64>,
-    },
-    Outline {
-        exposure: bool,
-        points: Vec<(f64, f64)>,
-        rotation: Option<f64>,
-    },
-    Polygon {
-        exposure: bool,
-        vertices: u32,
-        center_x: f64,
-        center_y: f64,
-        diameter: f64,
-        rotation: Option<f64>,
-    },
-    Thermal {
-        center_x: f64,
-        center_y: f64,
-        outer_diameter: f64,
-        inner_diameter: f64,
-        gap: f64,
-        rotation: Option<f64>,
-    },
-}
 
-#[derive(Debug, Clone)]
-pub struct ApertureMacro {
-    pub name: String,
-    pub primitives: Vec<MacroPrimitive>,
-}
-
-#[allow(dead_code)]
 pub struct Gerber2SVG {
     gerber_doc: GerberDoc,
     scale: f32,
@@ -106,11 +57,6 @@ pub struct Gerber2SVG {
     step_repeat_offset_y: f64,
     step_repeat_commands: Vec<Command>,
 
-    aperture_macros: HashMap<String, ApertureMacro>,
-    current_block_aperture: Option<i32>,
-    current_block_commands: Vec<Command>,
-    block_apertures: HashMap<String, Vec<Command>>,
-    attributes: HashMap<String, String>,
 
     min_x: f32,
     max_x: f32,
@@ -119,8 +65,11 @@ pub struct Gerber2SVG {
 }
 
 impl Gerber2SVG {
-    /// Create instance from a Gerber file
-    /// * filename: `&str` path to the gerber file
+    /// Creates a new Gerber2SVG instance from a Gerber file.
+    /// 
+    /// 
+    /// 
+    /// use gerber2svg::Gerber2SVG;
     #[allow(clippy::missing_errors_doc)]
     pub fn from_file(filename: &str) -> Result<Self, std::io::Error> {
         let file = File::open(filename)?;
@@ -130,8 +79,14 @@ impl Gerber2SVG {
         Ok(Self::from_gerber_doc(gerber_doc))
     }
 
-    /// Create Instance form `GerberDoc` struct
-    /// * `gerber_doc`: `GerberDoc` struct
+    /// Creates a new Gerber2SVG instance from a parsed GerberDoc.
+    /// 
+    /// * `gerber_doc` - A parsed GerberDoc structure containing Gerber commands
+    /// 
+    /// 
+    /// use gerber2svg::Gerber2SVG;
+    /// use gerber_types::GerberDoc;
+    /// 
     #[must_use]
     pub fn from_gerber_doc(gerber_doc: GerberDoc) -> Self {
         Self {
@@ -154,11 +109,6 @@ impl Gerber2SVG {
             step_repeat_offset_x: 0.0,
             step_repeat_offset_y: 0.0,
             step_repeat_commands: Vec::new(),
-            aperture_macros: HashMap::new(),
-            current_block_aperture: None,
-            current_block_commands: Vec::new(),
-            block_apertures: HashMap::new(),
-            attributes: HashMap::new(),
             min_x: f32::MAX,
             max_x: f32::MIN,
             min_y: f32::MAX,
@@ -166,6 +116,11 @@ impl Gerber2SVG {
         }
     }
 
+    /// 
+    /// 
+    /// 
+    /// use gerber2svg::Gerber2SVG;
+    ///     .set_scale(2.0);
     #[must_use]
     pub fn set_scale(mut self, scale: f32) -> Self {
         if scale > 0.0 {
@@ -174,17 +129,30 @@ impl Gerber2SVG {
         self
     }
 
+    /// 
+    /// 
+    /// 
+    /// use gerber2svg::Gerber2SVG;
     #[allow(clippy::missing_errors_doc)]
     pub fn save_svg(&self, filename: &str) -> Result<(), std::io::Error> {
         svg::save(filename, &self.svg_document)
     }
 
+    /// 
+    /// 
+    /// use gerber2svg::Gerber2SVG;
+    /// let svg_content = gerber.to_string();
     #[must_use]
     #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         self.svg_document.to_string()
     }
 
+    /// 
+    /// 
+    /// 
+    /// use gerber2svg::Gerber2SVG;
+    ///     .set_scale(1.5)
     #[must_use]
     pub fn build(mut self) -> Self {
         log::debug!("Start building...");
@@ -607,7 +575,6 @@ impl Gerber2SVG {
         (tx, ty)
     }
 
-    #[allow(dead_code)]
     fn finalize_step_and_repeat(&mut self) {
         if self.step_repeat_active && (!self.step_repeat_commands.is_empty()) {
             let mut doc = std::mem::replace(&mut self.svg_document, svg::Document::new());
@@ -634,136 +601,8 @@ impl Gerber2SVG {
         }
     }
 
-    #[allow(dead_code, clippy::unused_self)]
-    fn command_to_svg_element(&self, _command: &Command) -> Option<Box<dyn svg::node::Node>> {
-        None
-    }
 
-    #[allow(dead_code)]
-    fn parse_aperture_macro(name: &str, definition: &str) -> ApertureMacro {
-        let mut primitives = Vec::new();
 
-        for primitive_str in definition.split('*').filter(|s| !s.trim().is_empty()) {
-            if let Some(primitive) = Self::parse_primitive(primitive_str.trim()) {
-                primitives.push(primitive);
-            }
-        }
-
-        ApertureMacro {
-            name: name.to_string(),
-            primitives,
-        }
-    }
-
-    #[allow(dead_code, clippy::too_many_lines)]
-    fn parse_primitive(primitive_str: &str) -> Option<MacroPrimitive> {
-        let parts: Vec<&str> = primitive_str.split(',').collect();
-        if parts.is_empty() {
-            return None;
-        }
-
-        match parts[0].parse::<u32>() {
-            Ok(0) => Some(MacroPrimitive::Comment(
-                (*parts.get(1).unwrap_or(&"")).to_string(),
-            )),
-            Ok(1) => {
-                if parts.len() >= 5 {
-                    Some(MacroPrimitive::Circle {
-                        exposure: parts[1].parse().unwrap_or(1.0) > 0.0,
-                        diameter: parts[2].parse().unwrap_or(0.0),
-                        center_x: parts[3].parse().unwrap_or(0.0),
-                        center_y: parts[4].parse().unwrap_or(0.0),
-                        rotation: parts.get(5).and_then(|s| s.parse().ok()),
-                    })
-                } else {
-                    None
-                }
-            }
-            Ok(4) => {
-                if parts.len() >= 4 {
-                    let num_points: usize = parts[2].parse().unwrap_or(0);
-                    let mut points = Vec::new();
-                    for i in 0..num_points {
-                        let x_idx = 3 + i * 2;
-                        let y_idx = 4 + i * 2;
-                        if x_idx < parts.len() && y_idx < parts.len() {
-                            let x: f64 = parts[x_idx].parse().unwrap_or(0.0);
-                            let y: f64 = parts[y_idx].parse().unwrap_or(0.0);
-                            points.push((x, y));
-                        }
-                    }
-                    Some(MacroPrimitive::Outline {
-                        exposure: parts[1].parse().unwrap_or(1.0) > 0.0,
-                        points,
-                        rotation: None,
-                    })
-                } else {
-                    None
-                }
-            }
-            Ok(5) => {
-                if parts.len() >= 6 {
-                    Some(MacroPrimitive::Polygon {
-                        exposure: parts[1].parse().unwrap_or(1.0) > 0.0,
-                        vertices: parts[2].parse().unwrap_or(3),
-                        center_x: parts[3].parse().unwrap_or(0.0),
-                        center_y: parts[4].parse().unwrap_or(0.0),
-                        diameter: parts[5].parse().unwrap_or(0.0),
-                        rotation: parts.get(6).and_then(|s| s.parse().ok()),
-                    })
-                } else {
-                    None
-                }
-            }
-            Ok(7) => {
-                if parts.len() >= 6 {
-                    Some(MacroPrimitive::Thermal {
-                        center_x: parts[1].parse().unwrap_or(0.0),
-                        center_y: parts[2].parse().unwrap_or(0.0),
-                        outer_diameter: parts[3].parse().unwrap_or(0.0),
-                        inner_diameter: parts[4].parse().unwrap_or(0.0),
-                        gap: parts[5].parse().unwrap_or(0.0),
-                        rotation: parts.get(6).and_then(|s| s.parse().ok()),
-                    })
-                } else {
-                    None
-                }
-            }
-            Ok(20) => {
-                if parts.len() >= 7 {
-                    Some(MacroPrimitive::VectorLine {
-                        exposure: parts[1].parse().unwrap_or(1.0) > 0.0,
-                        width: parts[2].parse().unwrap_or(0.0),
-                        start_x: parts[3].parse().unwrap_or(0.0),
-                        start_y: parts[4].parse().unwrap_or(0.0),
-                        end_x: parts[5].parse().unwrap_or(0.0),
-                        end_y: parts[6].parse().unwrap_or(0.0),
-                        rotation: parts.get(7).and_then(|s| s.parse().ok()),
-                    })
-                } else {
-                    None
-                }
-            }
-            Ok(21) => {
-                if parts.len() >= 6 {
-                    Some(MacroPrimitive::CenterLine {
-                        exposure: parts[1].parse().unwrap_or(1.0) > 0.0,
-                        width: parts[2].parse().unwrap_or(0.0),
-                        height: parts[3].parse().unwrap_or(0.0),
-                        center_x: parts[4].parse().unwrap_or(0.0),
-                        center_y: parts[5].parse().unwrap_or(0.0),
-                        rotation: parts.get(6).and_then(|s| s.parse().ok()),
-                    })
-                } else {
-                    None
-                }
-            }
-            _ => {
-                log::warn!("Unsupported primitive code: {}", parts[0]);
-                None
-            }
-        }
-    }
 
     fn handle_step_and_repeat(&mut self, sr: &gerber_types::StepAndRepeat) {
         match sr {
@@ -790,158 +629,6 @@ impl Gerber2SVG {
         }
     }
 
-    #[allow(
-        dead_code,
-        clippy::too_many_lines,
-        clippy::cast_lossless,
-        clippy::cast_precision_loss
-    )]
-    fn instantiate_aperture_macro(&self, macro_def: &ApertureMacro, _params: &[f64]) -> Group {
-        let mut group = Group::new();
-
-        let fill_color = match self.polarity {
-            Polarity::Dark => "white",
-            Polarity::Clear => "black",
-        };
-
-        for primitive in &macro_def.primitives {
-            match primitive {
-                MacroPrimitive::Circle {
-                    exposure,
-                    diameter,
-                    center_x,
-                    center_y,
-                    rotation: _,
-                } => {
-                    let circle = Circle::new()
-                        .set("cx", *center_x)
-                        .set("cy", *center_y)
-                        .set("r", diameter / 2.0)
-                        .set("fill", if *exposure { fill_color } else { "black" });
-                    group = group.add(circle);
-                }
-                MacroPrimitive::VectorLine {
-                    exposure,
-                    width,
-                    start_x,
-                    start_y,
-                    end_x,
-                    end_y,
-                    rotation: _,
-                } => {
-                    let path_data = path::Data::new()
-                        .move_to((*start_x, *start_y))
-                        .line_to((*end_x, *end_y));
-
-                    let path = Path::new()
-                        .set("d", path_data)
-                        .set("stroke", if *exposure { fill_color } else { "black" })
-                        .set("stroke-width", *width)
-                        .set("fill", "none");
-                    group = group.add(path);
-                }
-                MacroPrimitive::CenterLine {
-                    exposure,
-                    width,
-                    height,
-                    center_x,
-                    center_y,
-                    rotation: _,
-                } => {
-                    let rect = Rectangle::new()
-                        .set("x", center_x - width / 2.0)
-                        .set("y", center_y - height / 2.0)
-                        .set("width", *width)
-                        .set("height", *height)
-                        .set("fill", if *exposure { fill_color } else { "black" });
-                    group = group.add(rect);
-                }
-                MacroPrimitive::Outline {
-                    exposure,
-                    points,
-                    rotation: _,
-                } => {
-                    if !points.is_empty() {
-                        let mut path_data = path::Data::new().move_to(points[0]);
-                        for point in points.iter().skip(1) {
-                            path_data = path_data.line_to(*point);
-                        }
-                        path_data = path_data.close();
-
-                        let polygon = Path::new()
-                            .set("d", path_data)
-                            .set("fill", if *exposure { fill_color } else { "black" });
-                        group = group.add(polygon);
-                    }
-                }
-                MacroPrimitive::Polygon {
-                    exposure,
-                    vertices,
-                    center_x,
-                    center_y,
-                    diameter,
-                    rotation,
-                } => {
-                    let mut points = Vec::new();
-                    for i in 0..*vertices {
-                        let angle = (f64::from(i) * 2.0 * std::f64::consts::PI
-                            / f64::from(*vertices))
-                            + rotation.unwrap_or(0.0).to_radians();
-                        let x = center_x + (diameter / 2.0) * angle.cos();
-                        let y = center_y + (diameter / 2.0) * angle.sin();
-                        points.push(format!("{x},{y}"));
-                    }
-
-                    let polygon = Polygon::new()
-                        .set("points", points.join(" "))
-                        .set("fill", if *exposure { fill_color } else { "black" });
-                    group = group.add(polygon);
-                }
-                MacroPrimitive::Thermal {
-                    center_x,
-                    center_y,
-                    outer_diameter,
-                    inner_diameter,
-                    gap,
-                    rotation: _,
-                } => {
-                    let outer_circle = Circle::new()
-                        .set("cx", *center_x)
-                        .set("cy", *center_y)
-                        .set("r", outer_diameter / 2.0)
-                        .set("fill", fill_color);
-
-                    let inner_circle = Circle::new()
-                        .set("cx", *center_x)
-                        .set("cy", *center_y)
-                        .set("r", inner_diameter / 2.0)
-                        .set("fill", "black");
-
-                    let gap_rect_h = Rectangle::new()
-                        .set("x", center_x - outer_diameter / 2.0)
-                        .set("y", center_y - gap / 2.0)
-                        .set("width", *outer_diameter)
-                        .set("height", *gap)
-                        .set("fill", "black");
-
-                    let gap_rect_v = Rectangle::new()
-                        .set("x", center_x - gap / 2.0)
-                        .set("y", center_y - outer_diameter / 2.0)
-                        .set("width", *gap)
-                        .set("height", *outer_diameter)
-                        .set("fill", "black");
-
-                    group = group.add(outer_circle);
-                    group = group.add(inner_circle);
-                    group = group.add(gap_rect_h);
-                    group = group.add(gap_rect_v);
-                }
-                MacroPrimitive::Comment(_) => {}
-            }
-        }
-
-        group
-    }
 }
 
 #[cfg(test)]

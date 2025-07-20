@@ -4,7 +4,6 @@ use gerber2svg::Gerber2SVG;
 // use crate::gerber_svg::GerberSVG;
 // mod gerber_svg;
 
-#[allow(dead_code)]
 #[derive(Debug, Parser)]
 #[command(name = "rusty-pcb", about = "Usage of rusty-pcb", version = "0.1.0")]
 struct Opt {

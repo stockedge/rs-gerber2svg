@@ -1,17 +1,121 @@
 # Gerber2SVG
 
-*Badges*
+[![Crates.io](https://img.shields.io/crates/v/gerber2svg.svg)](https://crates.io/crates/gerber2svg)
+[![Documentation](https://docs.rs/gerber2svg/badge.svg)](https://docs.rs/gerber2svg)
+[![License](https://img.shields.io/crates/l/gerber2svg.svg)](https://github.com/stockedge/rs-gerber2svg#license)
 
 ## Introduction
-Gerber2Svg is a library and utility written in [Rust](Rust), used to convert a [Gerber (x2 or x3) ](https://www.ucamco.com/files/downloads/file_en/456/gerber-layer-format-specification-revision-2023-03_en.pdf?75b8486ed12c0ba3d07ee9f48708eb20) file into an [SVG](https://en.wikipedia.org/wiki/SVG) file.
+Gerber2SVG is a Rust library and command-line utility for converting Gerber files (RS-274X format) into SVG files. It supports standard Gerber features including apertures, draw commands, regions, and polarity control.
 
-Le fichier SVG produit n'est **pas** un 'path' unique, mais un esemble de de chemin, rectangle, cercle, etc indépendant.
+The generated SVG files contain individual geometric elements (paths, rectangles, circles) rather than a single unified path, making them suitable for further processing and analysis.
 
-:warning: **this work is in progress**, please be kind :innocent:
+## Features
+
+### ✅ Supported Features
+- **Standard Apertures**: Circle, Rectangle, Obround, Polygon apertures
+- **Draw Commands**: Linear and arc interpolation with D01/D02/D03 codes
+- **Region Statements**: G36/G37 filled regions with proper polarity handling
+- **Polarity Control**: LPD (Dark) and LPC (Clear) polarity switching
+- **Coordinate Systems**: Support for various coordinate formats and units
+- **Scaling**: Configurable scaling of output SVG
+- **File I/O**: Read Gerber files and save/output SVG files
+
+### ❌ Current Limitations
+- **Aperture Macros (AM)**: Not supported due to parser limitations
+- **Step and Repeat (SR)**: Infrastructure exists but parser doesn't recognize commands
+- **Aperture Transformations (LM/LR/LS)**: Not supported due to parser limitations
+- **Block Apertures (AB)**: Not supported due to parser limitations
+
+> **Note**: The underlying `gerber_parser` crate (v0.1.2) does not support advanced RS274X features. Future versions may add support as the parser ecosystem evolves.
+
+## Installation
+
+### As a Library
+Add to your `Cargo.toml`:
+```toml
+[dependencies]
+gerber2svg = "0.2"
+```
+
+### As a Command-Line Tool
+```bash
+cargo install gerber2svg
+```
 
 ## Usage
-To Do  
-`gerber2svg --help`
 
-## Example
-To Do
+### Command Line
+```bash
+# Convert Gerber file to SVG
+gerber2svg -i input.gbr -o output.svg
+
+# Scale the output by 2x
+gerber2svg -i input.gbr -o output.svg --scale 2.0
+
+# Print SVG to stdout
+gerber2svg -i input.gbr
+
+# Enable verbose logging
+gerber2svg -i input.gbr -o output.svg --verbose
+
+# Show help
+gerber2svg --help
+```
+
+### Library Usage
+```rust
+use gerber2svg::Gerber2SVG;
+
+// Convert from file
+let gerber = Gerber2SVG::from_file("input.gbr")?
+    .set_scale(2.0)
+    .build();
+
+// Save to file
+gerber.save_svg("output.svg")?;
+
+// Get SVG as string
+let svg_content = gerber.to_string();
+```
+
+## Examples
+
+### Basic Conversion
+```rust
+use gerber2svg::Gerber2SVG;
+
+fn main() -> Result<(), std::io::Error> {
+    let gerber = Gerber2SVG::from_file("example.gbr")?
+        .set_scale(1.0)
+        .build();
+    
+    gerber.save_svg("example.svg")?;
+    println!("Conversion complete!");
+    Ok(())
+}
+```
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit issues and pull requests.
+
+### Development
+```bash
+# Clone the repository
+git clone https://github.com/stockedge/rs-gerber2svg.git
+cd rs-gerber2svg
+
+# Run tests
+cargo test
+
+# Run with example
+cargo run -- -i examples/example.gbr -o output.svg
+```
+
+## License
+
+This project is licensed under either of
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT License ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.
